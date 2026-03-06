@@ -258,6 +258,14 @@
         font-size: 0.92rem;
       }
 
+      .activity-meta {
+        color: var(--accent);
+        font-size: 0.78rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+
       .architecture-list {
         display: grid;
         gap: 10px;
@@ -441,6 +449,38 @@
           </article>
         </aside>
       </section>
+
+      <section class="module-shell">
+        <article class="module-card">
+          <div class="module-header">
+            <div>
+              <h2 class="module-title">Market Intelligence</h2>
+              <p class="module-sub">Market Intel Agent runs after each successful brief and scans AI, SaaS, creator, media, and automation opportunities.</p>
+            </div>
+          </div>
+          <div class="architecture-list">
+            <div class="architecture-item">
+              <strong id="market-intel-headline">Waiting for Market Intel Agent...</strong>
+              <span id="market-intel-opportunity">Opportunity analysis will appear here.</span>
+            </div>
+            <div class="architecture-item">
+              <strong>Threat</strong>
+              <span id="market-intel-threat">Threat analysis will appear here.</span>
+            </div>
+            <div class="architecture-item">
+              <strong>Recommendation</strong>
+              <span id="market-intel-recommendation">Recommendation will appear here.</span>
+            </div>
+          </div>
+        </article>
+
+        <aside class="stack">
+          <article class="module-card">
+            <p class="label">Market Intel Status</p>
+            <p class="value" id="market-intel-status">Standing by for the next completed brief.</p>
+          </article>
+        </aside>
+      </section>
     </main>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -493,6 +533,11 @@
       const agentActivityEmpty = document.getElementById("agent-activity-empty");
       const missionControlStatus = document.getElementById("mission-control-status");
       const agentArchitectureList = document.getElementById("agent-architecture-list");
+      const marketIntelHeadline = document.getElementById("market-intel-headline");
+      const marketIntelOpportunity = document.getElementById("market-intel-opportunity");
+      const marketIntelThreat = document.getElementById("market-intel-threat");
+      const marketIntelRecommendation = document.getElementById("market-intel-recommendation");
+      const marketIntelStatus = document.getElementById("market-intel-status");
 
       console.log("AI Assassins live build using worker:", WORKER_URL);
       console.log("AI Assassins build version:", BUILD_VERSION);
@@ -562,7 +607,7 @@
           inputs: "brief output, market feeds, focus",
           outputs: "market panel data",
           trigger: "post-brief success",
-          uiLocation: "Future Market panel"
+          uiLocation: "Market Intelligence panel"
         },
         {
           name: "Revenue Agent",
@@ -696,6 +741,14 @@
         });
       }
 
+      function renderMarketIntel(intel) {
+        marketIntelHeadline.textContent = intel.headline;
+        marketIntelOpportunity.textContent = intel.opportunity;
+        marketIntelThreat.textContent = intel.threat;
+        marketIntelRecommendation.textContent = intel.recommendation;
+        marketIntelStatus.textContent = `Updated ${new Date().toLocaleString()}`;
+      }
+
       function firstLine(content) {
         return String(content || "")
           .split("\n")
@@ -799,23 +852,25 @@
         }
 
         agentActivityEmpty.style.display = "none";
-        missionControlStatus.textContent = entries[0].title;
+        missionControlStatus.textContent = `${entries[0].agent} ${entries[0].action}`;
 
         entries.forEach((entry) => {
           const item = document.createElement("div");
           item.className = "activity-item";
           item.innerHTML = `
-            <strong>${entry.title}</strong>
+            <div class="activity-meta">${entry.timestamp}</div>
+            <strong>${entry.agent}</strong>
+            <span>Action: ${entry.action}</span>
             <span>${entry.detail}</span>
-            <span class="history-meta">${entry.timestamp}</span>
           `;
           agentActivityFeed.appendChild(item);
         });
       }
 
-      function addAgentActivityEntry(title, detail) {
+      function addAgentActivityEntry(agent, action, detail) {
         const nextEntry = {
-          title,
+          agent,
+          action,
           detail,
           timestamp: new Date().toLocaleString()
         };
@@ -841,20 +896,74 @@
         },
         startBriefRun(payload) {
           addAgentActivityEntry(
-            "Mission Control started brief run",
+            "Mission Control Agent",
+            "brief_run_started",
             `Brief Agent queued for ${payload.location} with focus ${payload.focus}.`
           );
         },
         finishBriefRun(resolvedBrief) {
           addAgentActivityEntry(
-            "Mission Control completed brief run",
+            "Mission Control Agent",
+            "brief_run_completed",
             `Next agents: ${this.getNextAgents(true).join(", ")}. Command note: ${resolvedBrief.command}`
           );
         },
         failBriefRun(message) {
           addAgentActivityEntry(
-            "Mission Control caught brief error",
+            "Mission Control Agent",
+            "brief_run_completed",
             `Next agents: ${this.getNextAgents(false).join(", ")}. Reason: ${message}`
+          );
+        }
+      };
+
+      const MarketIntelAgent = {
+        async run(context) {
+          addAgentActivityEntry(
+            "Mission Control Agent",
+            "market_intel_triggered",
+            "Market Intel Agent triggered after successful brief completion."
+          );
+          addAgentActivityEntry(
+            "Market Intel Agent",
+            "started",
+            "Scanning AI trends, SaaS opportunities, creator economy, media technology, and automation markets."
+          );
+          marketIntelStatus.textContent = "Market Intel Agent is analyzing current opportunities...";
+
+          const response = await fetch(`${WORKER_URL}/api/agents/market-intel`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              user_id: DEFAULT_SETTINGS.user_id,
+              tier: context.tier,
+              location: context.location,
+              focus: context.focus,
+              tone: context.tone,
+              brief_summary: context.summary,
+              brief_command: context.command
+            })
+          });
+
+          const data = await response.json();
+          if (!response.ok || !data?.market_intel) {
+            const message = data?.error || "market_intel_failed";
+            marketIntelStatus.textContent = message;
+            addAgentActivityEntry(
+              "Market Intel Agent",
+              "completed",
+              `Market intel failed: ${message}`
+            );
+            throw new Error(message);
+          }
+
+          renderMarketIntel(data.market_intel);
+          addAgentActivityEntry(
+            "Market Intel Agent",
+            "completed",
+            `Headline: ${data.market_intel.headline}`
           );
         }
       };
@@ -959,6 +1068,14 @@
         showBrief(resolvedBrief);
         saveBriefToHistory(resolvedBrief.historyBrief);
         MissionControlAgent.finishBriefRun(resolvedBrief);
+        MarketIntelAgent.run({
+          tier: payload.tier,
+          location: payload.location,
+          focus: payload.focus,
+          tone: payload.tone,
+          summary: resolvedBrief.overview,
+          command: resolvedBrief.command
+        }).catch((error) => console.error("Market Intel Agent error", error));
       }
 
       async function exportBriefPDF() {
