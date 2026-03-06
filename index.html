@@ -230,6 +230,49 @@
         line-height: 1.6;
       }
 
+      .activity-feed {
+        display: grid;
+        gap: 10px;
+      }
+
+      .activity-item {
+        padding: 14px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .activity-item strong,
+      .activity-item span {
+        display: block;
+      }
+
+      .activity-item strong {
+        margin-bottom: 6px;
+        font-size: 0.95rem;
+      }
+
+      .activity-item span {
+        color: var(--muted);
+        line-height: 1.5;
+        font-size: 0.92rem;
+      }
+
+      .architecture-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .architecture-item {
+        padding: 12px 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .architecture-item:first-child {
+        padding-top: 0;
+        border-top: 0;
+      }
+
       .stack {
         display: grid;
         gap: 12px;
@@ -374,6 +417,30 @@
           </article>
         </aside>
       </section>
+
+      <section class="module-shell">
+        <article class="module-card">
+          <div class="module-header">
+            <div>
+              <h2 class="module-title">Agent Activity</h2>
+              <p class="module-sub">Mission Control orchestrates the brief run and schedules future ARCHAIOS agents.</p>
+            </div>
+          </div>
+          <div class="activity-feed" id="agent-activity-feed"></div>
+          <p class="empty-state" id="agent-activity-empty">No agent activity yet. Generate a brief to start the Mission Control feed.</p>
+        </article>
+
+        <aside class="stack">
+          <article class="module-card">
+            <p class="label">Mission Control</p>
+            <p class="value" id="mission-control-status">Standing by for the next brief run.</p>
+          </article>
+          <article class="module-card">
+            <p class="label">ARCHAIOS Architecture</p>
+            <div class="architecture-list" id="agent-architecture-list"></div>
+          </article>
+        </aside>
+      </section>
     </main>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -384,6 +451,8 @@
       const HISTORY_STORAGE_KEY = "AI_ASSASSINS_BRIEF_HISTORY";
       const HISTORY_LIMIT = 8;
       const SETTINGS_STORAGE_KEY = "AI_ASSASSINS_SETTINGS_V1";
+      const AGENT_ACTIVITY_STORAGE_KEY = "AI_ASSASSINS_AGENT_ACTIVITY_V1";
+      const AGENT_ACTIVITY_LIMIT = 12;
       const PHASE1_STABLE = {
         commit: "c920a8f",
         build: "archaios-pages-2026-03-06-02"
@@ -420,9 +489,114 @@
       const resetSettingsButton = document.getElementById("reset-settings");
       const settingsStatus = document.getElementById("settings-status");
       const stableSnapshot = document.getElementById("stable-snapshot");
+      const agentActivityFeed = document.getElementById("agent-activity-feed");
+      const agentActivityEmpty = document.getElementById("agent-activity-empty");
+      const missionControlStatus = document.getElementById("mission-control-status");
+      const agentArchitectureList = document.getElementById("agent-architecture-list");
 
       console.log("AI Assassins live build using worker:", WORKER_URL);
       console.log("AI Assassins build version:", BUILD_VERSION);
+
+      // ARCHAIOS 7-Agent architecture
+      // agent name: Mission Control Agent
+      // purpose: orchestration layer for brief execution and future agent routing
+      // inputs: saved settings, brief request payload, brief outcome, system state
+      // outputs: activity feed entries, mission status, next-agent queue
+      // trigger: page load, Generate Brief, future scheduled orchestration
+      //
+      // agent name: Brief Agent
+      // purpose: generate the core intelligence brief
+      // inputs: prompt, location, focus, tone, tier
+      // outputs: overview, mission priorities, command note
+      // trigger: page load and manual brief runs
+      //
+      // agent name: Market Intel Agent
+      // purpose: derive market signal overlays for the brief
+      // inputs: brief output, market feeds, focus
+      // outputs: market panel state and alerts
+      // trigger: after successful brief runs
+      //
+      // agent name: Revenue Agent
+      // purpose: surface monetization and conversion opportunities
+      // inputs: mission focus, campaign state, usage context
+      // outputs: revenue actions and follow-up tasks
+      // trigger: after successful brief runs
+      //
+      // agent name: Security Sentinel Agent
+      // purpose: monitor operational risk and failure signals
+      // inputs: worker errors, auth state, agent activity
+      // outputs: warnings, incident summaries, guardrail actions
+      // trigger: after errors and scheduled checks
+      //
+      // agent name: Media Ops Agent
+      // purpose: convert brief intelligence into narrative/media actions
+      // inputs: brief output, Truthwave state, mission focus
+      // outputs: comms tasks and distribution suggestions
+      // trigger: after successful brief runs
+      //
+      // agent name: Growth Agent
+      // purpose: identify expansion opportunities from current intelligence
+      // inputs: brief output, focus, revenue signals
+      // outputs: growth experiments and next moves
+      // trigger: after successful brief runs
+      const AGENT_DEFINITIONS = [
+        {
+          name: "Mission Control Agent",
+          purpose: "Orchestrates brief execution and future agent routing.",
+          inputs: "saved settings, brief payload, run state",
+          outputs: "activity feed, status, next-agent queue",
+          trigger: "page load + Generate Brief",
+          uiLocation: "Agent Activity"
+        },
+        {
+          name: "Brief Agent",
+          purpose: "Generates the intelligence brief.",
+          inputs: "prompt, location, focus, tone, tier",
+          outputs: "overview, priorities, command note",
+          trigger: "page load + Generate Brief",
+          uiLocation: "Top brief cards"
+        },
+        {
+          name: "Market Intel Agent",
+          purpose: "Builds market overlays from the brief context.",
+          inputs: "brief output, market feeds, focus",
+          outputs: "market panel data",
+          trigger: "post-brief success",
+          uiLocation: "Future Market panel"
+        },
+        {
+          name: "Revenue Agent",
+          purpose: "Surfaces revenue actions from mission context.",
+          inputs: "brief output, growth context, offers",
+          outputs: "revenue recommendations",
+          trigger: "post-brief success",
+          uiLocation: "Future revenue section"
+        },
+        {
+          name: "Security Sentinel Agent",
+          purpose: "Monitors errors, auth state, and operational risk.",
+          inputs: "worker failures, activity feed, auth state",
+          outputs: "security warnings and guardrails",
+          trigger: "on failure + scheduled checks",
+          uiLocation: "Future security / Truthwave panel"
+        },
+        {
+          name: "Media Ops Agent",
+          purpose: "Translates intelligence into narrative and media tasks.",
+          inputs: "brief output, mission focus, Truthwave signals",
+          outputs: "media actions and messaging tasks",
+          trigger: "post-brief success",
+          uiLocation: "Future media / formatting layer"
+        },
+        {
+          name: "Growth Agent",
+          purpose: "Finds expansion opportunities from each brief cycle.",
+          inputs: "brief output, revenue context, mission focus",
+          outputs: "growth experiments and actions",
+          trigger: "post-brief success",
+          uiLocation: "Future growth feed"
+        }
+      ];
 
       function readHistory() {
         try {
@@ -463,6 +637,24 @@
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
       }
 
+      function readAgentActivity() {
+        try {
+          const raw = localStorage.getItem(AGENT_ACTIVITY_STORAGE_KEY);
+          if (!raw) {
+            return [];
+          }
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+          console.error("Agent activity read error", error);
+          return [];
+        }
+      }
+
+      function writeAgentActivity(entries) {
+        localStorage.setItem(AGENT_ACTIVITY_STORAGE_KEY, JSON.stringify(entries));
+      }
+
       function syncSettingsForm(settings) {
         settingsLocationInput.value = settings.location;
         settingsFocusInput.value = settings.focus;
@@ -484,6 +676,24 @@
           tier: settingsTierInput.value.trim() || DEFAULT_SETTINGS.tier,
           prompt: settingsPromptInput.value.trim() || DEFAULT_SETTINGS.prompt
         };
+      }
+
+      function renderAgentArchitecture() {
+        agentArchitectureList.innerHTML = "";
+
+        AGENT_DEFINITIONS.forEach((agent) => {
+          const item = document.createElement("div");
+          item.className = "architecture-item";
+          item.innerHTML = `
+            <strong>${agent.name}</strong>
+            <span>Purpose: ${agent.purpose}</span>
+            <span>Inputs: ${agent.inputs}</span>
+            <span>Outputs: ${agent.outputs}</span>
+            <span>Trigger: ${agent.trigger}</span>
+            <span>UI: ${agent.uiLocation}</span>
+          `;
+          agentArchitectureList.appendChild(item);
+        });
       }
 
       function firstLine(content) {
@@ -578,6 +788,77 @@
         briefTimestamp.textContent = `Generated ${getExportDateParts().label}`;
       }
 
+      function renderAgentActivity() {
+        const entries = readAgentActivity();
+        agentActivityFeed.innerHTML = "";
+
+        if (!entries.length) {
+          agentActivityEmpty.style.display = "block";
+          missionControlStatus.textContent = "Standing by for the next brief run.";
+          return;
+        }
+
+        agentActivityEmpty.style.display = "none";
+        missionControlStatus.textContent = entries[0].title;
+
+        entries.forEach((entry) => {
+          const item = document.createElement("div");
+          item.className = "activity-item";
+          item.innerHTML = `
+            <strong>${entry.title}</strong>
+            <span>${entry.detail}</span>
+            <span class="history-meta">${entry.timestamp}</span>
+          `;
+          agentActivityFeed.appendChild(item);
+        });
+      }
+
+      function addAgentActivityEntry(title, detail) {
+        const nextEntry = {
+          title,
+          detail,
+          timestamp: new Date().toLocaleString()
+        };
+        const entries = readAgentActivity();
+        entries.unshift(nextEntry);
+        writeAgentActivity(entries.slice(0, AGENT_ACTIVITY_LIMIT));
+        renderAgentActivity();
+      }
+
+      const MissionControlAgent = {
+        getNextAgents(success = true) {
+          return success
+            ? [
+                "Brief Agent",
+                "Market Intel Agent",
+                "Revenue Agent",
+                "Media Ops Agent",
+                "Growth Agent"
+              ]
+            : [
+                "Security Sentinel Agent"
+              ];
+        },
+        startBriefRun(payload) {
+          addAgentActivityEntry(
+            "Mission Control started brief run",
+            `Brief Agent queued for ${payload.location} with focus ${payload.focus}.`
+          );
+        },
+        finishBriefRun(resolvedBrief) {
+          addAgentActivityEntry(
+            "Mission Control completed brief run",
+            `Next agents: ${this.getNextAgents(true).join(", ")}. Command note: ${resolvedBrief.command}`
+          );
+        },
+        failBriefRun(message) {
+          addAgentActivityEntry(
+            "Mission Control caught brief error",
+            `Next agents: ${this.getNextAgents(false).join(", ")}. Reason: ${message}`
+          );
+        }
+      };
+
       function renderHistory() {
         const entries = readHistory();
         historyList.innerHTML = "";
@@ -641,6 +922,7 @@
         };
 
         console.log("Sending brief payload:", payload);
+        MissionControlAgent.startBriefRun(payload);
 
         const response = await fetch(`${WORKER_URL}/api/brief`, {
           method: "POST",
@@ -661,6 +943,7 @@
           marketAnalysis.textContent = message;
           missionPriorities.textContent = message;
           commandNote.textContent = message;
+          MissionControlAgent.failBriefRun(message);
           throw new Error(message);
         }
 
@@ -669,11 +952,13 @@
           marketAnalysis.textContent = message;
           missionPriorities.textContent = message;
           commandNote.textContent = message;
+          MissionControlAgent.failBriefRun(message);
           throw new Error(message);
         }
 
         showBrief(resolvedBrief);
         saveBriefToHistory(resolvedBrief.historyBrief);
+        MissionControlAgent.finishBriefRun(resolvedBrief);
       }
 
       async function exportBriefPDF() {
@@ -730,6 +1015,8 @@
       const initialSettings = readSettings();
       syncSettingsForm(initialSettings);
       updateSettingsStatus(initialSettings);
+      renderAgentArchitecture();
+      renderAgentActivity();
       renderHistory();
       loadBrief().catch((error) => console.error("Brief request error", error));
     </script>
