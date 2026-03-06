@@ -172,19 +172,23 @@
         missionPriorities.textContent = "Generating intelligence brief...";
         commandNote.textContent = "Generating intelligence brief...";
 
+        const payload = {
+          user_id: "guest-free",
+          tier: "free",
+          location: "Chicago",
+          focus: "market expansion",
+          tone: "direct",
+          prompt: "Generate a daily intelligence brief."
+        };
+
+        console.log("Sending brief payload:", payload);
+
         const response = await fetch(`${WORKER_URL}/api/brief`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({
-            user_id: "guest-free",
-            tier: "free",
-            location: "Chicago",
-            focus: "market expansion",
-            tone: "direct",
-            prompt: "Generate a daily intelligence brief"
-          })
+          body: JSON.stringify(payload)
         });
 
         const data = await response.json();
