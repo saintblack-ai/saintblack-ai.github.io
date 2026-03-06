@@ -104,6 +104,100 @@
         flex-wrap: wrap;
       }
 
+      .module-shell {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+        gap: 16px;
+      }
+
+      .module-card {
+        padding: 18px;
+        border-radius: 18px;
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 1px solid var(--border);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+      }
+
+      .module-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+
+      .module-title {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .module-sub {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .history-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .history-item {
+        width: 100%;
+        text-align: left;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 14px;
+        border-radius: 14px;
+      }
+
+      .history-item strong,
+      .history-item span {
+        display: block;
+      }
+
+      .history-item strong {
+        margin-bottom: 6px;
+        font-size: 0.98rem;
+      }
+
+      .history-item span {
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.5;
+      }
+
+      .history-meta {
+        margin-top: 8px;
+        color: var(--accent);
+        font-size: 0.8rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .empty-state {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .mini {
+        min-height: 0;
+      }
+
+      @media (max-width: 880px) {
+        .module-shell {
+          grid-template-columns: 1fr;
+        }
+      }
+
       button {
         border: 0;
         border-radius: 12px;
@@ -152,20 +246,129 @@
         <button id="refresh-brief" type="button">Generate Brief</button>
         <button class="secondary" id="copy-worker" type="button">Copy Worker URL</button>
       </div>
+
+      <section class="module-shell">
+        <article class="module-card">
+          <div class="module-header">
+            <div>
+              <h2 class="module-title">History</h2>
+              <p class="module-sub">Locally saved brief runs from the stable production build.</p>
+            </div>
+            <button class="secondary" id="clear-history" type="button">Clear History</button>
+          </div>
+          <div class="history-list" id="history-list"></div>
+          <p class="empty-state" id="history-empty">No saved briefs yet. Generate a brief to create the first history item.</p>
+        </article>
+
+        <aside class="stack">
+          <article class="module-card mini">
+            <p class="label">Phase 2</p>
+            <p class="value">Module 1 active: History. Brief generation remains on the current production flow.</p>
+          </article>
+          <article class="module-card mini">
+            <p class="label">History Storage</p>
+            <p class="value" id="history-status">Waiting for first generated brief.</p>
+          </article>
+        </aside>
+      </section>
     </main>
 
     <script>
       const WORKER_URL = "https://archaios-saas-worker.quandrix357.workers.dev";
-      const BUILD_VERSION = "archaios-pages-2026-03-06-01";
+      const BUILD_VERSION = "archaios-pages-2026-03-06-02";
+      const HISTORY_STORAGE_KEY = "AI_ASSASSINS_BRIEF_HISTORY";
+      const HISTORY_LIMIT = 8;
 
       const marketAnalysis = document.getElementById("market-analysis");
       const missionPriorities = document.getElementById("mission-priorities");
       const commandNote = document.getElementById("command-note");
       const refreshButton = document.getElementById("refresh-brief");
       const copyWorkerButton = document.getElementById("copy-worker");
+      const historyList = document.getElementById("history-list");
+      const historyEmpty = document.getElementById("history-empty");
+      const clearHistoryButton = document.getElementById("clear-history");
+      const historyStatus = document.getElementById("history-status");
 
       console.log("AI Assassins live build using worker:", WORKER_URL);
       console.log("AI Assassins build version:", BUILD_VERSION);
+
+      function readHistory() {
+        try {
+          const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+          if (!raw) {
+            return [];
+          }
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+          console.error("History read error", error);
+          return [];
+        }
+      }
+
+      function writeHistory(entries) {
+        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(entries));
+      }
+
+      function firstLine(content) {
+        return String(content || "")
+          .split("\n")
+          .map((line) => line.trim())
+          .find(Boolean) || "No mission priorities available.";
+      }
+
+      function showBrief(brief) {
+        marketAnalysis.textContent = brief.summary;
+        missionPriorities.textContent = firstLine(brief.content);
+        commandNote.textContent = brief.title;
+      }
+
+      function renderHistory() {
+        const entries = readHistory();
+        historyList.innerHTML = "";
+
+        if (!entries.length) {
+          historyEmpty.style.display = "block";
+          historyStatus.textContent = "Waiting for first generated brief.";
+          return;
+        }
+
+        historyEmpty.style.display = "none";
+        historyStatus.textContent = `${entries.length} saved brief${entries.length === 1 ? "" : "s"} stored locally.`;
+
+        entries.forEach((entry) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "history-item";
+          button.innerHTML = `
+            <strong>${entry.title}</strong>
+            <span>${entry.summary}</span>
+            <span class="history-meta">${entry.createdAtLabel}</span>
+          `;
+          button.addEventListener("click", () => {
+            showBrief(entry);
+          });
+          historyList.appendChild(button);
+        });
+      }
+
+      function saveBriefToHistory(brief) {
+        const now = new Date();
+        const nextEntry = {
+          title: brief.title || "Untitled Brief",
+          summary: brief.summary || "No summary available.",
+          content: brief.content || "",
+          createdAt: now.toISOString(),
+          createdAtLabel: now.toLocaleString()
+        };
+
+        const deduped = readHistory().filter((entry) => {
+          return !(entry.title === nextEntry.title && entry.summary === nextEntry.summary);
+        });
+        deduped.unshift(nextEntry);
+        writeHistory(deduped.slice(0, HISTORY_LIMIT));
+        renderHistory();
+      }
 
       async function loadBrief() {
         marketAnalysis.textContent = "Generating intelligence brief...";
@@ -207,9 +410,8 @@
           throw new Error(message);
         }
 
-        marketAnalysis.textContent = data.brief.summary;
-        missionPriorities.textContent = data.brief.content.split("\n")[0];
-        commandNote.textContent = data.brief.title;
+        showBrief(data.brief);
+        saveBriefToHistory(data.brief);
       }
 
       refreshButton.addEventListener("click", () => {
@@ -224,6 +426,12 @@
         }
       });
 
+      clearHistoryButton.addEventListener("click", () => {
+        localStorage.removeItem(HISTORY_STORAGE_KEY);
+        renderHistory();
+      });
+
+      renderHistory();
       loadBrief().catch((error) => console.error("Brief request error", error));
     </script>
   </body>
