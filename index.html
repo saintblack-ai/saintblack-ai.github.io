@@ -171,6 +171,7 @@
         marketAnalysis.textContent = "Generating intelligence brief...";
         missionPriorities.textContent = "Generating intelligence brief...";
         commandNote.textContent = "Generating intelligence brief...";
+        const defaultPrompt = "Generate a daily intelligence brief.";
 
         const payload = {
           user_id: "guest-free",
@@ -178,8 +179,12 @@
           location: "Chicago",
           focus: "market expansion",
           tone: "direct",
-          prompt: "Generate a daily intelligence brief."
+          prompt: defaultPrompt
         };
+
+        if (!payload.prompt) {
+          payload.prompt = defaultPrompt;
+        }
 
         console.log("Sending brief payload:", payload);
 
