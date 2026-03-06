@@ -184,6 +184,12 @@
         flex-wrap: wrap;
       }
 
+      .export-stamp {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
       .history-item {
         width: 100%;
         text-align: left;
@@ -268,7 +274,7 @@
         <div class="build" id="build-marker">build: archaios-pages-2026-03-06-01</div>
       </section>
 
-      <section class="grid">
+      <section class="grid" id="brief-export">
         <article class="card">
           <p class="label">Overnight Overview</p>
           <p class="value" id="market-analysis">Generating intelligence brief...</p>
@@ -281,10 +287,15 @@
           <p class="label">Command Note</p>
           <p class="value" id="command-note">Generating intelligence brief...</p>
         </article>
+        <article class="card">
+          <p class="label">Export Timestamp</p>
+          <p class="value" id="brief-timestamp">Waiting for brief generation...</p>
+        </article>
       </section>
 
       <div class="actions">
         <button id="refresh-brief" type="button">Generate Brief</button>
+        <button class="secondary" id="export-pdf" type="button">Export PDF</button>
         <button class="secondary" id="copy-worker" type="button">Copy Worker URL</button>
       </div>
 
@@ -365,7 +376,9 @@
       </section>
     </main>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script>
+      // Phase2-Base: stable production root build with live brief generation, history, settings, and PDF export.
       const WORKER_URL = "https://archaios-saas-worker.quandrix357.workers.dev";
       const BUILD_VERSION = "archaios-pages-2026-03-06-03";
       const HISTORY_STORAGE_KEY = "AI_ASSASSINS_BRIEF_HISTORY";
@@ -389,7 +402,10 @@
         document.getElementById("market-analysis");
       const missionPriorities = document.getElementById("mission-priorities");
       const commandNote = document.getElementById("command-note");
+      const briefExport = document.getElementById("brief-export");
+      const briefTimestamp = document.getElementById("brief-timestamp");
       const refreshButton = document.getElementById("refresh-brief");
+      const exportPdfButton = document.getElementById("export-pdf");
       const copyWorkerButton = document.getElementById("copy-worker");
       const historyList = document.getElementById("history-list");
       const historyEmpty = document.getElementById("history-empty");
@@ -477,6 +493,16 @@
           .find(Boolean) || "No mission priorities available.";
       }
 
+      function getExportDateParts(date = new Date()) {
+        const year = String(date.getFullYear());
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return {
+          fileStamp: `${year}-${month}-${day}`,
+          label: date.toLocaleString()
+        };
+      }
+
       function splitBriefText(text) {
         const normalized = String(text || "").replace(/\r/g, "").trim();
         const sections = normalized
@@ -549,6 +575,7 @@
         marketAnalysis.textContent = resolvedBrief.overview;
         missionPriorities.textContent = resolvedBrief.priorities;
         commandNote.textContent = resolvedBrief.command;
+        briefTimestamp.textContent = `Generated ${getExportDateParts().label}`;
       }
 
       function renderHistory() {
@@ -602,6 +629,7 @@
         marketAnalysis.textContent = "Generating intelligence brief...";
         missionPriorities.textContent = "Generating intelligence brief...";
         commandNote.textContent = "Generating intelligence brief...";
+        briefTimestamp.textContent = "Waiting for brief generation...";
         const savedSettings = readSettings();
         const payload = {
           user_id: DEFAULT_SETTINGS.user_id,
@@ -648,8 +676,29 @@
         saveBriefToHistory(resolvedBrief.historyBrief);
       }
 
+      async function exportBriefPDF() {
+        if (!window.html2pdf) {
+          throw new Error("pdf_export_unavailable");
+        }
+
+        const { fileStamp } = getExportDateParts();
+        const options = {
+          margin: 0.4,
+          filename: `AI_Assassins_Brief_${fileStamp}.pdf`,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, backgroundColor: "#08111c" },
+          jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
+        };
+
+        await window.html2pdf().set(options).from(briefExport).save();
+      }
+
       refreshButton.addEventListener("click", () => {
         loadBrief().catch((error) => console.error("Brief request error", error));
+      });
+
+      exportPdfButton.addEventListener("click", () => {
+        exportBriefPDF().catch((error) => console.error("PDF export error", error));
       });
 
       copyWorkerButton.addEventListener("click", async () => {
