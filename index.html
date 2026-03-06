@@ -143,6 +143,47 @@
         gap: 10px;
       }
 
+      .settings-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field label {
+        color: var(--muted);
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .field input,
+      .field textarea {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        padding: 12px 14px;
+        font: inherit;
+      }
+
+      .field textarea {
+        min-height: 112px;
+        resize: vertical;
+      }
+
+      .module-actions {
+        margin-top: 14px;
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
       .history-item {
         width: 100%;
         text-align: left;
@@ -262,8 +303,8 @@
 
         <aside class="stack">
           <article class="module-card mini">
-            <p class="label">Phase 2</p>
-            <p class="value">Module 1 active: History. Brief generation remains on the current production flow.</p>
+            <p class="label">Phase1-Stable</p>
+            <p class="value" id="stable-snapshot">Root production build at commit c920a8f. Live brief generation and history are the locked baseline.</p>
           </article>
           <article class="module-card mini">
             <p class="label">History Storage</p>
@@ -271,15 +312,81 @@
           </article>
         </aside>
       </section>
+
+      <section class="module-shell">
+        <article class="module-card">
+          <div class="module-header">
+            <div>
+              <h2 class="module-title">Settings</h2>
+              <p class="module-sub">Phase 2 Module 1. Local defaults for the stable production brief flow.</p>
+            </div>
+          </div>
+
+          <div class="settings-grid">
+            <div class="field">
+              <label for="settings-location">Location</label>
+              <input id="settings-location" type="text" placeholder="Chicago" />
+            </div>
+            <div class="field">
+              <label for="settings-focus">Focus</label>
+              <input id="settings-focus" type="text" placeholder="market expansion" />
+            </div>
+            <div class="field">
+              <label for="settings-tone">Tone</label>
+              <input id="settings-tone" type="text" placeholder="direct" />
+            </div>
+            <div class="field">
+              <label for="settings-tier">Tier</label>
+              <input id="settings-tier" type="text" placeholder="free" />
+            </div>
+          </div>
+
+          <div class="field" style="margin-top: 12px;">
+            <label for="settings-prompt">Prompt</label>
+            <textarea id="settings-prompt" placeholder="Generate a daily intelligence brief."></textarea>
+          </div>
+
+          <div class="module-actions">
+            <button id="save-settings" type="button">Save Settings</button>
+            <button class="secondary" id="reset-settings" type="button">Reset Defaults</button>
+          </div>
+        </article>
+
+        <aside class="stack">
+          <article class="module-card mini">
+            <p class="label">Settings Status</p>
+            <p class="value" id="settings-status">Using Phase1-Stable default brief settings.</p>
+          </article>
+          <article class="module-card mini">
+            <p class="label">Next Modules</p>
+            <p class="value">Export PDF, enhanced brief formatting, market panel, Truthwave, calendar/events, and agent activity feed.</p>
+          </article>
+        </aside>
+      </section>
     </main>
 
     <script>
       const WORKER_URL = "https://archaios-saas-worker.quandrix357.workers.dev";
-      const BUILD_VERSION = "archaios-pages-2026-03-06-02";
+      const BUILD_VERSION = "archaios-pages-2026-03-06-03";
       const HISTORY_STORAGE_KEY = "AI_ASSASSINS_BRIEF_HISTORY";
       const HISTORY_LIMIT = 8;
+      const SETTINGS_STORAGE_KEY = "AI_ASSASSINS_SETTINGS_V1";
+      const PHASE1_STABLE = {
+        commit: "c920a8f",
+        build: "archaios-pages-2026-03-06-02"
+      };
+      const DEFAULT_SETTINGS = {
+        user_id: "guest-free",
+        tier: "free",
+        location: "Chicago",
+        focus: "market expansion",
+        tone: "direct",
+        prompt: "Generate a daily intelligence brief."
+      };
 
-      const marketAnalysis = document.getElementById("market-analysis");
+      const marketAnalysis =
+        document.getElementById("overnight-overview") ||
+        document.getElementById("market-analysis");
       const missionPriorities = document.getElementById("mission-priorities");
       const commandNote = document.getElementById("command-note");
       const refreshButton = document.getElementById("refresh-brief");
@@ -288,6 +395,15 @@
       const historyEmpty = document.getElementById("history-empty");
       const clearHistoryButton = document.getElementById("clear-history");
       const historyStatus = document.getElementById("history-status");
+      const settingsLocationInput = document.getElementById("settings-location");
+      const settingsFocusInput = document.getElementById("settings-focus");
+      const settingsToneInput = document.getElementById("settings-tone");
+      const settingsTierInput = document.getElementById("settings-tier");
+      const settingsPromptInput = document.getElementById("settings-prompt");
+      const saveSettingsButton = document.getElementById("save-settings");
+      const resetSettingsButton = document.getElementById("reset-settings");
+      const settingsStatus = document.getElementById("settings-status");
+      const stableSnapshot = document.getElementById("stable-snapshot");
 
       console.log("AI Assassins live build using worker:", WORKER_URL);
       console.log("AI Assassins build version:", BUILD_VERSION);
@@ -310,6 +426,50 @@
         localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(entries));
       }
 
+      function readSettings() {
+        try {
+          const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+          if (!raw) {
+            return { ...DEFAULT_SETTINGS };
+          }
+          const parsed = JSON.parse(raw);
+          return {
+            ...DEFAULT_SETTINGS,
+            ...(parsed && typeof parsed === "object" ? parsed : {})
+          };
+        } catch (error) {
+          console.error("Settings read error", error);
+          return { ...DEFAULT_SETTINGS };
+        }
+      }
+
+      function writeSettings(settings) {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+      }
+
+      function syncSettingsForm(settings) {
+        settingsLocationInput.value = settings.location;
+        settingsFocusInput.value = settings.focus;
+        settingsToneInput.value = settings.tone;
+        settingsTierInput.value = settings.tier;
+        settingsPromptInput.value = settings.prompt;
+      }
+
+      function updateSettingsStatus(settings) {
+        settingsStatus.textContent = `Saved defaults: ${settings.location} | ${settings.focus} | ${settings.tone} | ${settings.tier}`;
+      }
+
+      function collectSettingsFromForm() {
+        return {
+          ...DEFAULT_SETTINGS,
+          location: settingsLocationInput.value.trim() || DEFAULT_SETTINGS.location,
+          focus: settingsFocusInput.value.trim() || DEFAULT_SETTINGS.focus,
+          tone: settingsToneInput.value.trim() || DEFAULT_SETTINGS.tone,
+          tier: settingsTierInput.value.trim() || DEFAULT_SETTINGS.tier,
+          prompt: settingsPromptInput.value.trim() || DEFAULT_SETTINGS.prompt
+        };
+      }
+
       function firstLine(content) {
         return String(content || "")
           .split("\n")
@@ -317,10 +477,78 @@
           .find(Boolean) || "No mission priorities available.";
       }
 
-      function showBrief(brief) {
-        marketAnalysis.textContent = brief.summary;
-        missionPriorities.textContent = firstLine(brief.content);
-        commandNote.textContent = brief.title;
+      function splitBriefText(text) {
+        const normalized = String(text || "").replace(/\r/g, "").trim();
+        const sections = normalized
+          .split(/\n\s*\n/)
+          .map((section) => section.trim())
+          .filter(Boolean);
+        const lines = normalized
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+
+        const overview = sections[0] || lines[0] || "No overview available.";
+        const priorities =
+          lines.find((line) => /^[-*•]/.test(line)) ||
+          sections[1] ||
+          lines[1] ||
+          "No mission priorities available.";
+        const command = sections[2] || lines[2] || lines[0] || "No command note available.";
+
+        return {
+          overview,
+          priorities: priorities.replace(/^[-*•]\s*/, ""),
+          command
+        };
+      }
+
+      function normalizeBriefResponse(data) {
+        if (typeof data?.brief === "string" && data.brief.trim()) {
+          const parsedText = splitBriefText(data.brief);
+          return {
+            overview: parsedText.overview,
+            priorities: parsedText.priorities,
+            command: parsedText.command,
+            historyBrief: {
+              title: parsedText.command,
+              summary: parsedText.overview,
+              content: data.brief
+            }
+          };
+        }
+
+        const brief = data?.brief && typeof data.brief === "object" ? data.brief : {};
+        const parsedText = splitBriefText(brief.content || "");
+        const overview = brief.summary || brief.overview || data?.overview || parsedText.overview || "";
+        const priorities =
+          firstLine(brief.content) ||
+          brief.priorities ||
+          data?.priorities ||
+          parsedText.priorities ||
+          "";
+        const command = brief.title || brief.command || data?.command || parsedText.command || "";
+
+        if (!overview || !priorities || !command) {
+          throw new Error("brief_fields_missing");
+        }
+
+        return {
+          overview,
+          priorities,
+          command,
+          historyBrief: {
+            title: command,
+            summary: overview,
+            content: String(brief.content || data?.brief || data?.priorities || priorities)
+          }
+        };
+      }
+
+      function showBrief(resolvedBrief) {
+        marketAnalysis.textContent = resolvedBrief.overview;
+        missionPriorities.textContent = resolvedBrief.priorities;
+        commandNote.textContent = resolvedBrief.command;
       }
 
       function renderHistory() {
@@ -374,20 +602,15 @@
         marketAnalysis.textContent = "Generating intelligence brief...";
         missionPriorities.textContent = "Generating intelligence brief...";
         commandNote.textContent = "Generating intelligence brief...";
-        const defaultPrompt = "Generate a daily intelligence brief.";
-
+        const savedSettings = readSettings();
         const payload = {
-          user_id: "guest-free",
-          tier: "free",
-          location: "Chicago",
-          focus: "market expansion",
-          tone: "direct",
-          prompt: defaultPrompt
+          user_id: DEFAULT_SETTINGS.user_id,
+          tier: savedSettings.tier || DEFAULT_SETTINGS.tier,
+          location: savedSettings.location || DEFAULT_SETTINGS.location,
+          focus: savedSettings.focus || DEFAULT_SETTINGS.focus,
+          tone: savedSettings.tone || DEFAULT_SETTINGS.tone,
+          prompt: savedSettings.prompt || DEFAULT_SETTINGS.prompt
         };
-
-        if (!payload.prompt) {
-          payload.prompt = defaultPrompt;
-        }
 
         console.log("Sending brief payload:", payload);
 
@@ -402,16 +625,27 @@
         const data = await response.json();
         console.error("Brief API response:", data);
 
-        if (!response.ok || !data.brief) {
-          const message = data.error || "brief_generation_failed";
+        let resolvedBrief;
+        try {
+          resolvedBrief = normalizeBriefResponse(data);
+        } catch (error) {
+          const message = data?.error || error.message || "brief_generation_failed";
           marketAnalysis.textContent = message;
           missionPriorities.textContent = message;
           commandNote.textContent = message;
           throw new Error(message);
         }
 
-        showBrief(data.brief);
-        saveBriefToHistory(data.brief);
+        if (!response.ok) {
+          const message = data?.error || "brief_generation_failed";
+          marketAnalysis.textContent = message;
+          missionPriorities.textContent = message;
+          commandNote.textContent = message;
+          throw new Error(message);
+        }
+
+        showBrief(resolvedBrief);
+        saveBriefToHistory(resolvedBrief.historyBrief);
       }
 
       refreshButton.addEventListener("click", () => {
@@ -431,6 +665,22 @@
         renderHistory();
       });
 
+      saveSettingsButton.addEventListener("click", () => {
+        const nextSettings = collectSettingsFromForm();
+        writeSettings(nextSettings);
+        updateSettingsStatus(nextSettings);
+      });
+
+      resetSettingsButton.addEventListener("click", () => {
+        writeSettings(DEFAULT_SETTINGS);
+        syncSettingsForm(DEFAULT_SETTINGS);
+        updateSettingsStatus(DEFAULT_SETTINGS);
+      });
+
+      stableSnapshot.textContent = `Root production build at commit ${PHASE1_STABLE.commit}. Build ${PHASE1_STABLE.build} is the locked baseline.`;
+      const initialSettings = readSettings();
+      syncSettingsForm(initialSettings);
+      updateSettingsStatus(initialSettings);
       renderHistory();
       loadBrief().catch((error) => console.error("Brief request error", error));
     </script>
