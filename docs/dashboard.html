@@ -67,6 +67,16 @@
         font-size: 0.85rem;
       }
 
+      .pages-banner {
+        margin: 0 0 20px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: rgba(113, 215, 255, 0.08);
+        color: var(--accent);
+        font-size: 0.92rem;
+      }
+
       .grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -315,6 +325,7 @@
   </head>
   <body>
     <main class="shell">
+      <div class="pages-banner">AI Assassins Pages build active. Project route: /Ai-Assassins/</div>
       <section class="hero">
         <div>
           <h1>AI Assassins</h1>
@@ -487,6 +498,7 @@
     <script>
       // Phase2-Base: stable production root build with live brief generation, history, settings, and PDF export.
       const WORKER_URL = "https://archaios-saas-worker.quandrix357.workers.dev";
+      const PROJECT_ROUTE = "/Ai-Assassins/";
       const BUILD_VERSION = "archaios-pages-2026-03-06-03";
       const HISTORY_STORAGE_KEY = "AI_ASSASSINS_BRIEF_HISTORY";
       const HISTORY_LIMIT = 8;
@@ -541,6 +553,8 @@
 
       console.log("AI Assassins live build using worker:", WORKER_URL);
       console.log("AI Assassins build version:", BUILD_VERSION);
+      console.log("AI Assassins Pages build active");
+      console.log("Project route:", PROJECT_ROUTE);
 
       // ARCHAIOS 7-Agent architecture
       // agent name: Mission Control Agent
