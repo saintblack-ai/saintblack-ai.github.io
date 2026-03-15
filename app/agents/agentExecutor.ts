@@ -9,6 +9,9 @@ import {
 import { writeAgentLog } from "../lib/agentLogs";
 import { fetchWorker, getWorkerHeaders } from "../lib/workerClient";
 import { buildExperimentExecutionDraft, buildExperimentProposal } from "./ExperimentAgent";
+import { generateLaunchAssets } from "./LaunchAssetAgent";
+import { generateOfferDraft } from "./OfferGeneratorAgent";
+import { generateStripeDraft } from "./StripeDraftAgent";
 
 const EXECUTOR_AGENT_NAME = "ARCHAIOS Executor";
 
@@ -18,7 +21,10 @@ export const AGENT_EXECUTION_TARGETS = {
   "Revenue Agent": "/api/agents/revenue",
   "Growth Agent": "/api/agents/marketing",
   "Media Ops Agent": "/api/agents/content",
-  "Experiment Agent": null
+  "Experiment Agent": null,
+  "Offer Generator Agent": null,
+  "Stripe Draft Agent": null,
+  "Launch Asset Agent": null
 } as const;
 
 export type AgentTaskRecord = {
@@ -185,6 +191,15 @@ async function markFailed(task: AgentTaskRecord, errorMessage: string) {
 }
 
 async function runTask(task: AgentTaskRecord) {
+  if (task.task_type === "offer_generation") {
+    const offerDraft = await generateOfferDraft(task.payload || {});
+    return {
+      ok: true,
+      status: 200,
+      payload: offerDraft
+    };
+  }
+
   if (task.task_type === "experiment_proposal") {
     const proposal = await buildExperimentProposal(task.payload || {});
     const autoApproved = Number(proposal.experiment.risk_score || 0) <= MAX_AUTOMATIC_APPROVED_RISK_SCORE;
@@ -301,6 +316,24 @@ async function runTask(task: AgentTaskRecord) {
       ok: true,
       status: 200,
       payload: executionDraft
+    };
+  }
+
+  if (task.task_type === "stripe_draft") {
+    const draft = await generateStripeDraft(task.payload || {});
+    return {
+      ok: true,
+      status: 200,
+      payload: draft
+    };
+  }
+
+  if (task.task_type === "launch_asset_generation") {
+    const assets = await generateLaunchAssets(task.payload || {});
+    return {
+      ok: true,
+      status: 200,
+      payload: assets
     };
   }
 

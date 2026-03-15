@@ -506,6 +506,30 @@
         <article class="module-card">
           <div class="module-header">
             <div>
+              <h2 class="module-title">Venture Engine</h2>
+              <p class="module-sub">Generated venture offers, approval state, Stripe draft readiness, and launch asset coverage.</p>
+            </div>
+          </div>
+          <div class="activity-feed" id="venture-offer-list"></div>
+          <p class="empty-state" id="venture-offer-empty">No venture offers generated yet.</p>
+        </article>
+
+        <aside class="stack">
+          <article class="module-card">
+            <p class="label">Venture Status</p>
+            <p class="value" id="venture-engine-status">Loading venture offers...</p>
+          </article>
+          <article class="module-card">
+            <p class="label">Safety Rule</p>
+            <p class="value">No ads, no auto-email, and no live Stripe creation unless explicitly enabled server-side.</p>
+          </article>
+        </aside>
+      </section>
+
+      <section class="module-shell">
+        <article class="module-card">
+          <div class="module-header">
+            <div>
               <h2 class="module-title">Market Intelligence</h2>
               <p class="module-sub">Market Intel Agent runs after each successful brief and scans AI, SaaS, creator, media, and automation opportunities.</p>
             </div>
@@ -592,6 +616,9 @@
       const approvalQueueList = document.getElementById("approval-queue-list");
       const approvalQueueEmpty = document.getElementById("approval-queue-empty");
       const approvalQueueStatus = document.getElementById("approval-queue-status");
+      const ventureOfferList = document.getElementById("venture-offer-list");
+      const ventureOfferEmpty = document.getElementById("venture-offer-empty");
+      const ventureEngineStatus = document.getElementById("venture-engine-status");
       const marketIntelHeadline = document.getElementById("market-intel-headline");
       const marketIntelOpportunity = document.getElementById("market-intel-opportunity");
       const marketIntelThreat = document.getElementById("market-intel-threat");
@@ -825,10 +852,10 @@
           item.className = "activity-item";
           item.innerHTML = `
             <div class="activity-meta">${new Date(approval.created_at).toLocaleString()}</div>
-            <strong>${approval.agent_name} :: ${approval.action_type}</strong>
+            <strong>${approval.action_type === "venture_offer" ? "Venture Offer Approval" : `${approval.agent_name} :: ${approval.action_type}`}</strong>
             <span>Risk Score: ${Number(approval.risk_score || 0).toFixed(2)}</span>
             <span>${approval.reason || "No reason provided."}</span>
-            <span>${approval.payload?.hypothesis || approval.payload?.copy?.body || "Awaiting review."}</span>
+            <span>${approval.payload?.offer?.title || approval.payload?.hypothesis || approval.payload?.copy?.body || "Awaiting review."}</span>
             <div class="module-actions">
               <button type="button" data-approval-id="${approval.id}" data-approval-action="approved">Approve</button>
               <button type="button" class="secondary" data-approval-id="${approval.id}" data-approval-action="denied">Deny</button>
@@ -907,6 +934,63 @@
 
         await refreshApprovalQueue();
         await refreshAgentQueueStatus();
+        await refreshVentureOffers();
+      }
+
+      function formatPrice(cents) {
+        return new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD"
+        }).format(Number(cents || 0) / 100);
+      }
+
+      function renderVentureOffers(offers) {
+        ventureOfferList.innerHTML = "";
+
+        if (!offers.length) {
+          ventureOfferEmpty.style.display = "block";
+          ventureEngineStatus.textContent = "No venture offers available.";
+          return;
+        }
+
+        ventureOfferEmpty.style.display = "none";
+        ventureEngineStatus.textContent = `${offers.length} venture offer${offers.length === 1 ? "" : "s"} loaded.`;
+
+        offers.forEach((offer) => {
+          const item = document.createElement("div");
+          item.className = "activity-item";
+          item.innerHTML = `
+            <div class="activity-meta">${new Date(offer.created_at).toLocaleString()}</div>
+            <strong>${offer.title}</strong>
+            <span>Status: ${offer.status}</span>
+            <span>Price: ${formatPrice(offer.price_cents)} · ${offer.billing_type}</span>
+            <span>Approval: ${offer.approval_id ? "linked" : "none"} · Stripe draft: ${offer.stripe_draft_exists ? "ready" : "missing"} · Assets: ${offer.launch_asset_count}</span>
+            <span>${offer.promise}</span>
+          `;
+          ventureOfferList.appendChild(item);
+        });
+      }
+
+      async function refreshVentureOffers() {
+        try {
+          const response = await fetch("/api/venture/offers", {
+            headers: {
+              Accept: "application/json"
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error(`Venture offers request failed: ${response.status}`);
+          }
+
+          const payload = await response.json();
+          renderVentureOffers(Array.isArray(payload.offers) ? payload.offers : []);
+        } catch (error) {
+          console.error("Venture offers error", error);
+          ventureOfferList.innerHTML = "";
+          ventureOfferEmpty.style.display = "block";
+          ventureEngineStatus.textContent = "Venture offers unavailable.";
+        }
       }
 
       function renderMarketIntel(intel) {
@@ -1305,6 +1389,8 @@
       window.setInterval(refreshAgentQueueStatus, 60000);
       refreshApprovalQueue();
       window.setInterval(refreshApprovalQueue, 60000);
+      refreshVentureOffers();
+      window.setInterval(refreshVentureOffers, 60000);
       renderAgentActivity();
       renderHistory();
       loadBrief().catch((error) => console.error("Brief request error", error));

@@ -46,22 +46,56 @@ export async function POST(request: Request) {
   }
 
   if (decision === "approved") {
-    const { error: taskError } = await supabaseAdmin
-      .from("agent_tasks")
-      .insert({
-        agent_name: approval.agent_name,
-        task_type: approval.action_type,
-        payload: {
-          approval_id: approval.id,
-          experiment: approval.payload
-        },
-        status: "pending",
-        priority: 2,
-        scheduled_at: nowIso
-      });
+    if (approval.action_type === "venture_offer") {
+      const offerId = String(approval.payload?.offer_id || "");
+      if (!offerId) {
+        return NextResponse.json({ error: "Venture offer approval missing offer_id" }, { status: 400 });
+      }
 
-    if (taskError) {
-      return NextResponse.json({ error: taskError.message }, { status: 500 });
+      const { error: offerUpdateError } = await supabaseAdmin
+        .from("venture_offers")
+        .update({
+          status: "approved",
+          updated_at: nowIso
+        })
+        .eq("id", offerId);
+
+      if (offerUpdateError) {
+        return NextResponse.json({ error: offerUpdateError.message }, { status: 500 });
+      }
+    } else {
+      const { error: taskError } = await supabaseAdmin
+        .from("agent_tasks")
+        .insert({
+          agent_name: approval.agent_name,
+          task_type: approval.action_type,
+          payload: {
+            approval_id: approval.id,
+            experiment: approval.payload
+          },
+          status: "pending",
+          priority: 2,
+          scheduled_at: nowIso
+        });
+
+      if (taskError) {
+        return NextResponse.json({ error: taskError.message }, { status: 500 });
+      }
+    }
+  } else if (approval.action_type === "venture_offer") {
+    const offerId = String(approval.payload?.offer_id || "");
+    if (offerId) {
+      const { error: offerUpdateError } = await supabaseAdmin
+        .from("venture_offers")
+        .update({
+          status: "archived",
+          updated_at: nowIso
+        })
+        .eq("id", offerId);
+
+      if (offerUpdateError) {
+        return NextResponse.json({ error: offerUpdateError.message }, { status: 500 });
+      }
     }
   }
 

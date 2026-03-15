@@ -11,7 +11,8 @@ const SCHEDULED_AGENTS = [
   { agent_name: "Revenue Agent", task_type: "revenue_review", priority: 2 },
   { agent_name: "Growth Agent", task_type: "growth_scan", priority: 3 },
   { agent_name: "Media Ops Agent", task_type: "media_ops_sync", priority: 3 },
-  { agent_name: "Experiment Agent", task_type: "experiment_proposal", priority: 4 }
+  { agent_name: "Experiment Agent", task_type: "experiment_proposal", priority: 4 },
+  { agent_name: "Offer Generator Agent", task_type: "offer_generation", priority: 4 }
 ] as const;
 
 const SCHEDULER_WINDOW_MS = 60 * 1000;
@@ -115,6 +116,98 @@ export async function scheduleAgentTasks(now = new Date()) {
 
     if (data) {
       inserted.push(data);
+    }
+  }
+
+  const [{ data: approvedOffers, error: approvedOffersError }, { data: launchAssets, error: launchAssetsError }] = await Promise.all([
+    supabaseAdmin
+      .from("venture_offers")
+      .select("id, title, status, stripe_product_id, stripe_price_id, result")
+      .eq("status", "approved")
+      .order("updated_at", { ascending: false })
+      .limit(20),
+    supabaseAdmin
+      .from("venture_launch_assets")
+      .select("offer_id, asset_type")
+  ]);
+
+  if (approvedOffersError) {
+    throw new Error(`Unable to inspect approved venture offers: ${approvedOffersError.message}`);
+  }
+
+  if (launchAssetsError) {
+    throw new Error(`Unable to inspect venture launch assets: ${launchAssetsError.message}`);
+  }
+
+  const assetCounts = (launchAssets || []).reduce<Record<string, number>>((acc, asset) => {
+    const key = String(asset.offer_id);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  for (const offer of approvedOffers || []) {
+    const offerId = String(offer.id);
+    const stripeDraftExists = Boolean(
+      offer.stripe_product_id ||
+      offer.stripe_price_id ||
+      (offer.result && typeof offer.result === "object" && "stripe_draft" in offer.result)
+    );
+
+    if (!stripeDraftExists) {
+      const stripeTaskExists = await hasRecentQueuedTask("Stripe Draft Agent", "stripe_draft", nowIso);
+      if (!stripeTaskExists) {
+        const { data, error } = await supabaseAdmin
+          .from("agent_tasks")
+          .insert({
+            agent_name: "Stripe Draft Agent",
+            task_type: "stripe_draft",
+            payload: {
+              offer_id: offerId
+            },
+            priority: 2,
+            status: "pending",
+            scheduled_at: nowIso
+          })
+          .select("id, agent_name, task_type, status, priority, scheduled_at")
+          .maybeSingle();
+
+        if (error) {
+          throw new Error(`Unable to schedule Stripe draft task for ${offer.title}: ${error.message}`);
+        }
+
+        if (data) {
+          inserted.push(data);
+        }
+      }
+    }
+
+    const launchAssetCount = assetCounts[offerId] || 0;
+    if (launchAssetCount < 4) {
+      const assetTaskExists = await hasRecentQueuedTask("Launch Asset Agent", "launch_asset_generation", nowIso);
+      if (!assetTaskExists) {
+        const { data, error } = await supabaseAdmin
+          .from("agent_tasks")
+          .insert({
+            agent_name: "Launch Asset Agent",
+            task_type: "launch_asset_generation",
+            payload: {
+              offer_id: offerId
+            },
+            priority: 3,
+            status: "pending",
+            scheduled_at: nowIso
+          })
+          .select("id, agent_name, task_type, status, priority, scheduled_at")
+          .maybeSingle();
+
+        if (error) {
+          throw new Error(`Unable to schedule launch asset task for ${offer.title}: ${error.message}`);
+        }
+
+        if (data) {
+          inserted.push(data);
+        }
+      }
     }
   }
 
