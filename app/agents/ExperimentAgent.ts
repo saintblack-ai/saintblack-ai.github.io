@@ -54,6 +54,12 @@ export async function buildExperimentProposal(input: Record<string, unknown> = {
     (revenueSummary && typeof revenueSummary === "object" && "total_revenue" in revenueSummary && revenueSummary.total_revenue) || 0
   );
 
+  const focus =
+    String(input.focus || input.system_focus || "Revenue expansion");
+  const audience =
+    "Founders and operators evaluating AI workflow automation for revenue and market intelligence.";
+  const riskScore = mrr > 0 ? 0.62 : 0.48;
+
   const experiment = {
     experiment_id: buildExperimentId(),
     hypothesis:
@@ -63,11 +69,18 @@ export async function buildExperimentProposal(input: Record<string, unknown> = {
     offer: {
       name: mrr > 0 ? "Operator Revenue Sprint" : "ARCHAIOS Signal Sprint",
       price: mrr > 0 ? 149 : 49,
-      trial: mrr <= 0
+      cadence: mrr > 0 ? "one-time sprint" : "weekly pilot",
+      audience
     },
-    audience: "Founders and operators evaluating AI workflow automation for revenue and market intelligence.",
-    copy_draft: `Test a sharp ${mrr > 0 ? "upsell" : "entry"} offer around ARCHAIOS. Lead with: ${marketSignal}`,
+    copy: {
+      headline: mrr > 0
+        ? "Turn ARCHAIOS intelligence into immediate revenue action."
+        : "Launch a focused ARCHAIOS signal sprint for your next growth move.",
+      body: `Focus: ${focus}. Test a sharp ${mrr > 0 ? "upsell" : "entry"} offer around ARCHAIOS. Lead with: ${marketSignal}`,
+      cta: mrr > 0 ? "Book the sprint" : "Start the pilot"
+    },
     expected_metric: mrr > 0 ? "Upgrade conversion rate" : "First paid conversion rate",
+    risk_score: riskScore,
     supporting_context: {
       market_signal: marketSignal,
       current_mrr: mrr,
@@ -78,6 +91,7 @@ export async function buildExperimentProposal(input: Record<string, unknown> = {
   return {
     market_intel: marketIntel,
     revenue_summary: revenueSummary,
+    system_focus: focus,
     experiment
   };
 }
@@ -93,12 +107,12 @@ export async function buildExperimentExecutionDraft(input: Record<string, unknow
     content_draft: {
       title: `Launch draft for ${String((proposal as Record<string, unknown>).offer && ((proposal as Record<string, unknown>).offer as Record<string, unknown>).name || "ARCHAIOS experiment")}`,
       summary: String((proposal as Record<string, unknown>).hypothesis || ""),
-      body: `Audience: ${String((proposal as Record<string, unknown>).audience || "")}\n\nCopy Draft:\n${String((proposal as Record<string, unknown>).copy_draft || "")}\n\nExpected Metric: ${String((proposal as Record<string, unknown>).expected_metric || "")}`
+      body: `Audience: ${String((proposal as Record<string, unknown>).offer && ((proposal as Record<string, unknown>).offer as Record<string, unknown>).audience || "")}\n\nHeadline: ${String((proposal as Record<string, unknown>).copy && ((proposal as Record<string, unknown>).copy as Record<string, unknown>).headline || "")}\n\nBody:\n${String((proposal as Record<string, unknown>).copy && ((proposal as Record<string, unknown>).copy as Record<string, unknown>).body || "")}\n\nCTA: ${String((proposal as Record<string, unknown>).copy && ((proposal as Record<string, unknown>).copy as Record<string, unknown>).cta || "")}\n\nExpected Metric: ${String((proposal as Record<string, unknown>).expected_metric || "")}`
     },
     stripe_product_draft: {
       name: String((proposal as Record<string, unknown>).offer && ((proposal as Record<string, unknown>).offer as Record<string, unknown>).name || "ARCHAIOS Offer"),
       price: Number((proposal as Record<string, unknown>).offer && ((proposal as Record<string, unknown>).offer as Record<string, unknown>).price || 0),
-      trial: Boolean((proposal as Record<string, unknown>).offer && ((proposal as Record<string, unknown>).offer as Record<string, unknown>).trial)
+      cadence: String((proposal as Record<string, unknown>).offer && ((proposal as Record<string, unknown>).offer as Record<string, unknown>).cadence || "one-time")
     }
   };
 }

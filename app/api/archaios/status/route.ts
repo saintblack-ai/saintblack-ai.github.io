@@ -39,7 +39,7 @@ export async function GET() {
         .from("agent_logs")
         .select("id, agent_name, level, message, metadata, created_at")
         .order("created_at", { ascending: false })
-        .limit(5)
+        .limit(10)
     ]);
 
     const firstError = [
@@ -57,14 +57,16 @@ export async function GET() {
     }
 
     return NextResponse.json({
-      system_time: new Date().toISOString(),
-      pending_tasks: pendingTasks.count || 0,
-      running_tasks: runningTasks.count || 0,
-      completed_today: completedToday.count || 0,
-      failed_today: failedToday.count || 0,
-      last_executor_run: lastExecutorRun.data?.created_at || "unknown",
+      time: new Date().toISOString(),
+      tasks: {
+        pending: pendingTasks.count || 0,
+        running: runningTasks.count || 0,
+        completed_today: completedToday.count || 0,
+        failed_today: failedToday.count || 0
+      },
       revenue_summary: revenueSummary.data || null,
-      latest_agent_logs: latestLogs.data || []
+      logs: latestLogs.data || [],
+      last_executor_run: lastExecutorRun.data?.created_at || "unknown"
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load ARCHAIOS status";

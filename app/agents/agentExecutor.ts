@@ -144,7 +144,7 @@ async function runTask(task: AgentTaskRecord) {
         action_type: "experiment_execution",
         payload: proposal.experiment,
         status: "pending",
-        risk_score: 0.62,
+        risk_score: Number(proposal.experiment.risk_score || 0),
         reason: "Experiment launch affects pricing and outbound messaging, so human approval is required."
       })
       .select("id, status, risk_score")

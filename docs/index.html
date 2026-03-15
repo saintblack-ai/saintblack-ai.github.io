@@ -828,7 +828,7 @@
             <strong>${approval.agent_name} :: ${approval.action_type}</strong>
             <span>Risk Score: ${Number(approval.risk_score || 0).toFixed(2)}</span>
             <span>${approval.reason || "No reason provided."}</span>
-            <span>${approval.payload?.hypothesis || approval.payload?.copy_draft || "Awaiting review."}</span>
+            <span>${approval.payload?.hypothesis || approval.payload?.copy?.body || "Awaiting review."}</span>
             <div class="module-actions">
               <button type="button" data-approval-id="${approval.id}" data-approval-action="approved">Approve</button>
               <button type="button" class="secondary" data-approval-id="${approval.id}" data-approval-action="denied">Deny</button>
