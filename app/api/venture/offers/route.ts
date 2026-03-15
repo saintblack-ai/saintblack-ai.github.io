@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "../../../lib/supabaseAdmin";
 
 export async function GET() {
-  const [offersResult, assetsResult, metricsResult] = await Promise.all([
+  const [offersResult, assetsResult, metricsResult, trendsResult, experimentsResult] = await Promise.all([
     supabaseAdmin
       .from("venture_offers")
       .select("*")
@@ -13,6 +13,17 @@ export async function GET() {
       .select("offer_id, asset_type"),
     supabaseAdmin
       .from("venture_metrics")
+      .select("*")
+      .order("revenue_cents", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabaseAdmin
+      .from("trend_signals")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .order("momentum_score", { ascending: false })
+      .limit(6),
+    supabaseAdmin
+      .from("venture_experiments")
       .select("*")
       .order("created_at", { ascending: false })
   ]);
@@ -29,6 +40,14 @@ export async function GET() {
     return NextResponse.json({ error: metricsResult.error.message }, { status: 500 });
   }
 
+  if (trendsResult.error) {
+    return NextResponse.json({ error: trendsResult.error.message }, { status: 500 });
+  }
+
+  if (experimentsResult.error) {
+    return NextResponse.json({ error: experimentsResult.error.message }, { status: 500 });
+  }
+
   const assetCounts = (assetsResult.data || []).reduce<Record<string, number>>((acc, asset) => {
     const key = String(asset.offer_id);
     acc[key] = (acc[key] || 0) + 1;
@@ -39,6 +58,14 @@ export async function GET() {
     const key = String(metric.offer_id);
     if (!acc[key]) {
       acc[key] = metric;
+    }
+    return acc;
+  }, {});
+
+  const latestExperiments = (experimentsResult.data || []).reduce<Record<string, Record<string, unknown>>>((acc, experiment) => {
+    const key = String(experiment.offer_id);
+    if (!acc[key]) {
+      acc[key] = experiment;
     }
     return acc;
   }, {});
@@ -54,8 +81,17 @@ export async function GET() {
     approval_state: offer.status === "pending_approval" ? "pending" : offer.status,
     launch_asset_count: assetCounts[String(offer.id)] || 0,
     launch_assets_ready: (assetCounts[String(offer.id)] || 0) >= 4,
-    metrics: latestMetrics[String(offer.id)] || null
+    metrics: latestMetrics[String(offer.id)] || null,
+    experiment: latestExperiments[String(offer.id)] || null
   }));
 
-  return NextResponse.json({ offers });
+  const topPerforming = [...offers]
+    .sort((a, b) => Number(b.metrics?.revenue_cents || 0) - Number(a.metrics?.revenue_cents || 0))
+    .slice(0, 3);
+
+  return NextResponse.json({
+    offers,
+    trends: trendsResult.data || [],
+    top_performing: topPerforming
+  });
 }

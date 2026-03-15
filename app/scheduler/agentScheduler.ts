@@ -9,6 +9,8 @@ const SCHEDULED_AGENTS = [
   { agent_name: "Brief Agent", task_type: "brief_refresh", priority: 1 },
   { agent_name: "Market Intel Agent", task_type: "market_intel", priority: 2 },
   { agent_name: "Revenue Agent", task_type: "revenue_review", priority: 2 },
+  { agent_name: "Trend Scanner Agent", task_type: "trend_scan", priority: 2 },
+  { agent_name: "Opportunity Ranker Agent", task_type: "opportunity_rank", priority: 3 },
   { agent_name: "Growth Agent", task_type: "growth_scan", priority: 3 },
   { agent_name: "Media Ops Agent", task_type: "media_ops_sync", priority: 3 },
   { agent_name: "Experiment Agent", task_type: "experiment_proposal", priority: 4 },
@@ -125,7 +127,12 @@ export async function scheduleAgentTasks(now = new Date()) {
     }
   }
 
-  const [{ data: approvedOffers, error: approvedOffersError }, { data: launchAssets, error: launchAssetsError }, { data: ventureMetrics, error: ventureMetricsError }] = await Promise.all([
+  const [
+    { data: approvedOffers, error: approvedOffersError },
+    { data: launchAssets, error: launchAssetsError },
+    { data: ventureMetrics, error: ventureMetricsError },
+    { data: experimentPlans, error: experimentPlansError }
+  ] = await Promise.all([
     supabaseAdmin
       .from("venture_offers")
       .select("id, title, status, stripe_product_id, stripe_price_id, result")
@@ -137,7 +144,10 @@ export async function scheduleAgentTasks(now = new Date()) {
       .select("offer_id, asset_type"),
     supabaseAdmin
       .from("venture_metrics")
-      .select("offer_id, updated_at")
+      .select("offer_id, updated_at"),
+    supabaseAdmin
+      .from("venture_experiments")
+      .select("offer_id, created_at")
   ]);
 
   if (approvedOffersError) {
@@ -150,6 +160,10 @@ export async function scheduleAgentTasks(now = new Date()) {
 
   if (ventureMetricsError) {
     throw new Error(`Unable to inspect venture metrics: ${ventureMetricsError.message}`);
+  }
+
+  if (experimentPlansError) {
+    throw new Error(`Unable to inspect venture experiment plans: ${experimentPlansError.message}`);
   }
 
   const assetCounts = (launchAssets || []).reduce<Record<string, number>>((acc, asset) => {
@@ -166,8 +180,45 @@ export async function scheduleAgentTasks(now = new Date()) {
     return acc;
   }, {});
 
+  const experimentPlanLookup = (experimentPlans || []).reduce<Record<string, boolean>>((acc, plan) => {
+    acc[String(plan.offer_id)] = true;
+    return acc;
+  }, {});
+
   for (const offer of approvedOffers || []) {
     const offerId = String(offer.id);
+    const experimentPlanned = Boolean(experimentPlanLookup[offerId]);
+
+    if (!experimentPlanned) {
+      const experimentTaskExists = await hasRecentQueuedTask("Experiment Planner Agent", "experiment_plan", nowIso, offerId);
+      if (!experimentTaskExists) {
+        const { data, error } = await supabaseAdmin
+          .from("agent_tasks")
+          .insert({
+            agent_name: "Experiment Planner Agent",
+            task_type: "experiment_plan",
+            payload: {
+              offer_id: offerId
+            },
+            priority: 2,
+            status: "pending",
+            scheduled_at: nowIso
+          })
+          .select("id, agent_name, task_type, status, priority, scheduled_at")
+          .maybeSingle();
+
+        if (error) {
+          throw new Error(`Unable to schedule experiment plan task for ${offer.title}: ${error.message}`);
+        }
+
+        if (data) {
+          inserted.push(data);
+        }
+      }
+
+      continue;
+    }
+
     const stripeDraftExists = Boolean(
       offer.stripe_product_id ||
       offer.stripe_price_id ||
@@ -185,7 +236,7 @@ export async function scheduleAgentTasks(now = new Date()) {
             payload: {
               offer_id: offerId
             },
-            priority: 2,
+            priority: 3,
             status: "pending",
             scheduled_at: nowIso
           })
@@ -214,7 +265,7 @@ export async function scheduleAgentTasks(now = new Date()) {
             payload: {
               offer_id: offerId
             },
-            priority: 3,
+            priority: 4,
             status: "pending",
             scheduled_at: nowIso
           })
@@ -247,7 +298,7 @@ export async function scheduleAgentTasks(now = new Date()) {
             payload: {
               offer_id: offerId
             },
-            priority: 4,
+            priority: 5,
             status: "pending",
             scheduled_at: nowIso
           })

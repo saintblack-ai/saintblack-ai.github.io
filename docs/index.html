@@ -530,6 +530,30 @@
         <article class="module-card">
           <div class="module-header">
             <div>
+              <h2 class="module-title">Opportunity Scanner</h2>
+              <p class="module-sub">Autonomous discovery from trend signals, ranked venture opportunities, and experiment planning state.</p>
+            </div>
+          </div>
+          <div class="activity-feed" id="opportunity-scanner-list"></div>
+          <p class="empty-state" id="opportunity-scanner-empty">No trend signals or ranked opportunities yet.</p>
+        </article>
+
+        <aside class="stack">
+          <article class="module-card">
+            <p class="label">Scanner Status</p>
+            <p class="value" id="opportunity-scanner-status">Loading opportunity scanner...</p>
+          </article>
+          <article class="module-card">
+            <p class="label">Top Performing Ventures</p>
+            <div class="architecture-list" id="top-performing-ventures"></div>
+          </article>
+        </aside>
+      </section>
+
+      <section class="module-shell">
+        <article class="module-card">
+          <div class="module-header">
+            <div>
               <h2 class="module-title">Market Intelligence</h2>
               <p class="module-sub">Market Intel Agent runs after each successful brief and scans AI, SaaS, creator, media, and automation opportunities.</p>
             </div>
@@ -619,6 +643,10 @@
       const ventureOfferList = document.getElementById("venture-offer-list");
       const ventureOfferEmpty = document.getElementById("venture-offer-empty");
       const ventureEngineStatus = document.getElementById("venture-engine-status");
+      const opportunityScannerList = document.getElementById("opportunity-scanner-list");
+      const opportunityScannerEmpty = document.getElementById("opportunity-scanner-empty");
+      const opportunityScannerStatus = document.getElementById("opportunity-scanner-status");
+      const topPerformingVentures = document.getElementById("top-performing-ventures");
       const marketIntelHeadline = document.getElementById("market-intel-headline");
       const marketIntelOpportunity = document.getElementById("market-intel-opportunity");
       const marketIntelThreat = document.getElementById("market-intel-threat");
@@ -958,6 +986,7 @@
 
         offers.forEach((offer) => {
           const metrics = offer.metrics || {};
+          const experiment = offer.experiment || {};
           const item = document.createElement("div");
           item.className = "activity-item";
           item.innerHTML = `
@@ -965,11 +994,65 @@
             <strong>${offer.title}</strong>
             <span>Status: ${offer.status} · Approval: ${offer.approval_state || (offer.approval_id ? "linked" : "none")}</span>
             <span>Price: ${formatPrice(offer.price_cents)} · ${offer.billing_type}</span>
+            <span>Experiment: ${experiment.launch_channel ? `${experiment.launch_channel} / ${experiment.success_metric}` : "pending"}</span>
             <span>Stripe: ${offer.stripe_product_created ? "live product ready" : offer.stripe_draft_exists ? "draft ready" : "missing"} · Assets: ${offer.launch_assets_ready ? "ready" : `${offer.launch_asset_count || 0}/4`}</span>
             <span>Metrics: ${Number(metrics.views || 0)} views · ${Number(metrics.clicks || 0)} clicks · ${Number(metrics.conversions || 0)} conversions · ${formatPrice(metrics.revenue_cents || 0)}</span>
             <span>${offer.promise}</span>
           `;
           ventureOfferList.appendChild(item);
+        });
+      }
+
+      function renderOpportunityScanner(trends, offers, topPerforming) {
+        opportunityScannerList.innerHTML = "";
+        topPerformingVentures.innerHTML = "";
+
+        if (!trends.length && !offers.length) {
+          opportunityScannerEmpty.style.display = "block";
+          opportunityScannerStatus.textContent = "No opportunity signals available.";
+        } else {
+          opportunityScannerEmpty.style.display = "none";
+          opportunityScannerStatus.textContent = `${trends.length} trend signal${trends.length === 1 ? "" : "s"} · ${offers.length} generated opportunit${offers.length === 1 ? "y" : "ies"}.`;
+        }
+
+        trends.slice(0, 3).forEach((trend) => {
+          const item = document.createElement("div");
+          item.className = "activity-item";
+          item.innerHTML = `
+            <div class="activity-meta">${new Date(trend.created_at).toLocaleString()} · ${trend.source}</div>
+            <strong>${trend.topic}</strong>
+            <span>Momentum: ${Number(trend.momentum_score || 0)} · Audience: ${Number(trend.audience_size || 0).toLocaleString()}</span>
+            <span>${trend.problem_detected}</span>
+          `;
+          opportunityScannerList.appendChild(item);
+        });
+
+        offers.slice(0, 3).forEach((offer) => {
+          const item = document.createElement("div");
+          item.className = "activity-item";
+          item.innerHTML = `
+            <div class="activity-meta">opportunity</div>
+            <strong>${offer.title}</strong>
+            <span>Confidence: ${Number(offer.confidence_score || 0).toFixed(2)} · Approval: ${offer.approval_state || offer.status}</span>
+            <span>Experiment: ${offer.experiment?.launch_channel ? "planned" : "pending"} · Stripe: ${offer.stripe_product_created ? "ready" : "pending"}</span>
+            <span>${offer.problem || offer.promise}</span>
+          `;
+          opportunityScannerList.appendChild(item);
+        });
+
+        if (!topPerforming.length) {
+          topPerformingVentures.innerHTML = '<div class="architecture-item"><strong>No performance leaders yet</strong><span>Top ventures will appear after metrics updates begin landing.</span></div>';
+          return;
+        }
+
+        topPerforming.forEach((offer) => {
+          const row = document.createElement("div");
+          row.className = "architecture-item";
+          row.innerHTML = `
+            <strong>${offer.title}</strong>
+            <span>${formatPrice(offer.metrics?.revenue_cents || 0)} revenue · ${Number(offer.metrics?.conversions || 0)} conversions</span>
+          `;
+          topPerformingVentures.appendChild(row);
         });
       }
 
@@ -987,11 +1070,20 @@
 
           const payload = await response.json();
           renderVentureOffers(Array.isArray(payload.offers) ? payload.offers : []);
+          renderOpportunityScanner(
+            Array.isArray(payload.trends) ? payload.trends : [],
+            Array.isArray(payload.offers) ? payload.offers : [],
+            Array.isArray(payload.top_performing) ? payload.top_performing : []
+          );
         } catch (error) {
           console.error("Venture offers error", error);
           ventureOfferList.innerHTML = "";
           ventureOfferEmpty.style.display = "block";
           ventureEngineStatus.textContent = "Venture offers unavailable.";
+          opportunityScannerList.innerHTML = "";
+          opportunityScannerEmpty.style.display = "block";
+          opportunityScannerStatus.textContent = "Opportunity scanner unavailable.";
+          topPerformingVentures.innerHTML = "";
         }
       }
 

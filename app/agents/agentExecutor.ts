@@ -8,10 +8,13 @@ import {
 } from "../lib/archaiosConfig";
 import { writeAgentLog } from "../lib/agentLogs";
 import { fetchWorker, getWorkerHeaders } from "../lib/workerClient";
+import { planVentureExperiment } from "./ExperimentPlannerAgent";
 import { buildExperimentExecutionDraft, buildExperimentProposal } from "./ExperimentAgent";
 import { generateLaunchCampaign } from "./LaunchCampaignAgent";
 import { generateOfferDraft } from "./OfferGeneratorAgent";
+import { rankTrendOpportunities } from "./OpportunityRankerAgent";
 import { createStripeProduct } from "./StripeProductAgent";
+import { scanTrendSignals } from "./TrendScannerAgent";
 import { updateVentureMetrics } from "./VentureMetricsAgent";
 
 const EXECUTOR_AGENT_NAME = "ARCHAIOS Executor";
@@ -23,6 +26,9 @@ export const AGENT_EXECUTION_TARGETS = {
   "Growth Agent": "/api/agents/marketing",
   "Media Ops Agent": "/api/agents/content",
   "Experiment Agent": null,
+  "Trend Scanner Agent": null,
+  "Opportunity Ranker Agent": null,
+  "Experiment Planner Agent": null,
   "Offer Generator Agent": null,
   "Stripe Product Agent": null,
   "Launch Campaign Agent": null,
@@ -195,6 +201,24 @@ async function markFailed(task: AgentTaskRecord, errorMessage: string) {
 }
 
 async function runTask(task: AgentTaskRecord) {
+  if (task.task_type === "trend_scan") {
+    const signals = await scanTrendSignals(task.payload || {});
+    return {
+      ok: true,
+      status: 200,
+      payload: signals
+    };
+  }
+
+  if (task.task_type === "opportunity_rank") {
+    const opportunities = await rankTrendOpportunities();
+    return {
+      ok: true,
+      status: 200,
+      payload: opportunities
+    };
+  }
+
   if (task.task_type === "offer_generation") {
     const offerDraft = await generateOfferDraft(task.payload || {});
     return {
@@ -338,6 +362,15 @@ async function runTask(task: AgentTaskRecord) {
       ok: true,
       status: 200,
       payload: assets
+    };
+  }
+
+  if (task.task_type === "experiment_plan") {
+    const experiment = await planVentureExperiment(task.payload || {});
+    return {
+      ok: true,
+      status: 200,
+      payload: experiment
     };
   }
 
