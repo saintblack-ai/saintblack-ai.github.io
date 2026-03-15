@@ -455,8 +455,49 @@
             <p class="value" id="mission-control-status">Standing by for the next brief run.</p>
           </article>
           <article class="module-card">
+            <p class="label">Agent Queue Status</p>
+            <div class="architecture-list">
+              <div class="architecture-item">
+                <strong>Pending Tasks</strong>
+                <span id="agent-queue-pending">Waiting for queue status...</span>
+              </div>
+              <div class="architecture-item">
+                <strong>Running Tasks</strong>
+                <span id="agent-queue-running">Waiting for queue status...</span>
+              </div>
+              <div class="architecture-item">
+                <strong>Completed Tasks</strong>
+                <span id="agent-queue-completed">Waiting for queue status...</span>
+              </div>
+            </div>
+          </article>
+          <article class="module-card">
             <p class="label">ARCHAIOS Architecture</p>
             <div class="architecture-list" id="agent-architecture-list"></div>
+          </article>
+        </aside>
+      </section>
+
+      <section class="module-shell">
+        <article class="module-card">
+          <div class="module-header">
+            <div>
+              <h2 class="module-title">Approval Queue</h2>
+              <p class="module-sub">Risky actions remain human-gated before any execution task can run.</p>
+            </div>
+          </div>
+          <div class="activity-feed" id="approval-queue-list"></div>
+          <p class="empty-state" id="approval-queue-empty">No pending approvals in queue.</p>
+        </article>
+
+        <aside class="stack">
+          <article class="module-card">
+            <p class="label">Approval Queue Status</p>
+            <p class="value" id="approval-queue-status">Loading approval queue...</p>
+          </article>
+          <article class="module-card">
+            <p class="label">Safe Rule</p>
+            <p class="value">ARCHAIOS can draft experiments, but launch actions stay behind approval.</p>
           </article>
         </aside>
       </section>
@@ -545,6 +586,12 @@
       const agentActivityEmpty = document.getElementById("agent-activity-empty");
       const missionControlStatus = document.getElementById("mission-control-status");
       const agentArchitectureList = document.getElementById("agent-architecture-list");
+      const agentQueuePending = document.getElementById("agent-queue-pending");
+      const agentQueueRunning = document.getElementById("agent-queue-running");
+      const agentQueueCompleted = document.getElementById("agent-queue-completed");
+      const approvalQueueList = document.getElementById("approval-queue-list");
+      const approvalQueueEmpty = document.getElementById("approval-queue-empty");
+      const approvalQueueStatus = document.getElementById("approval-queue-status");
       const marketIntelHeadline = document.getElementById("market-intel-headline");
       const marketIntelOpportunity = document.getElementById("market-intel-opportunity");
       const marketIntelThreat = document.getElementById("market-intel-threat");
@@ -753,6 +800,113 @@
           `;
           agentArchitectureList.appendChild(item);
         });
+      }
+
+      function renderAgentQueueStatus(status) {
+        agentQueuePending.textContent = String(status.pending_tasks ?? "Unavailable");
+        agentQueueRunning.textContent = String(status.running_tasks ?? "Unavailable");
+        agentQueueCompleted.textContent = String(status.completed_tasks ?? "Unavailable");
+      }
+
+      function renderApprovals(approvals) {
+        approvalQueueList.innerHTML = "";
+
+        if (!approvals.length) {
+          approvalQueueEmpty.style.display = "block";
+          approvalQueueStatus.textContent = "No pending approvals.";
+          return;
+        }
+
+        approvalQueueEmpty.style.display = "none";
+        approvalQueueStatus.textContent = `${approvals.length} approval${approvals.length === 1 ? "" : "s"} pending review.`;
+
+        approvals.forEach((approval) => {
+          const item = document.createElement("div");
+          item.className = "activity-item";
+          item.innerHTML = `
+            <div class="activity-meta">${new Date(approval.created_at).toLocaleString()}</div>
+            <strong>${approval.agent_name} :: ${approval.action_type}</strong>
+            <span>Risk Score: ${Number(approval.risk_score || 0).toFixed(2)}</span>
+            <span>${approval.reason || "No reason provided."}</span>
+            <span>${approval.payload?.hypothesis || approval.payload?.copy_draft || "Awaiting review."}</span>
+            <div class="module-actions">
+              <button type="button" data-approval-id="${approval.id}" data-approval-action="approved">Approve</button>
+              <button type="button" class="secondary" data-approval-id="${approval.id}" data-approval-action="denied">Deny</button>
+            </div>
+          `;
+          approvalQueueList.appendChild(item);
+        });
+
+        approvalQueueList.querySelectorAll("[data-approval-action]").forEach((button) => {
+          button.addEventListener("click", () => {
+            updateApprovalDecision(button.dataset.approvalId, button.dataset.approvalAction).catch((error) =>
+              console.error("Approval update error", error)
+            );
+          });
+        });
+      }
+
+      async function refreshAgentQueueStatus() {
+        try {
+          const response = await fetch("/api/agents/status", {
+            headers: {
+              Accept: "application/json"
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error(`Status request failed: ${response.status}`);
+          }
+
+          renderAgentQueueStatus(await response.json());
+        } catch (error) {
+          console.error("Agent queue status error", error);
+          renderAgentQueueStatus({
+            pending_tasks: "Unavailable",
+            running_tasks: "Unavailable",
+            completed_tasks: "Unavailable"
+          });
+        }
+      }
+
+      async function refreshApprovalQueue() {
+        try {
+          const response = await fetch("/api/agents/approvals/list?status=pending", {
+            headers: {
+              Accept: "application/json"
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error(`Approval queue request failed: ${response.status}`);
+          }
+
+          const payload = await response.json();
+          renderApprovals(Array.isArray(payload.approvals) ? payload.approvals : []);
+        } catch (error) {
+          console.error("Approval queue error", error);
+          approvalQueueList.innerHTML = "";
+          approvalQueueEmpty.style.display = "block";
+          approvalQueueStatus.textContent = "Approval queue unavailable.";
+        }
+      }
+
+      async function updateApprovalDecision(id, decision) {
+        const response = await fetch("/api/agents/approvals/approve", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ id, decision })
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error || `Approval update failed: ${response.status}`);
+        }
+
+        await refreshApprovalQueue();
+        await refreshAgentQueueStatus();
       }
 
       function renderMarketIntel(intel) {
@@ -1147,6 +1301,10 @@
       syncSettingsForm(initialSettings);
       updateSettingsStatus(initialSettings);
       renderAgentArchitecture();
+      refreshAgentQueueStatus();
+      window.setInterval(refreshAgentQueueStatus, 60000);
+      refreshApprovalQueue();
+      window.setInterval(refreshApprovalQueue, 60000);
       renderAgentActivity();
       renderHistory();
       loadBrief().catch((error) => console.error("Brief request error", error));

@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
-import { requireDashboardUser } from "../../../lib/dashboardAuth";
-import { fetchWorker, getWorkerHeaders } from "../../../lib/workerClient";
+import { getAgentQueueSnapshot } from "../../../agents/agentExecutor";
 
 export async function GET() {
-  const auth = await requireDashboardUser();
-  if ("error" in auth) {
-    return NextResponse.json({ error: auth.error }, { status: 401 });
+  try {
+    const snapshot = await getAgentQueueSnapshot();
+    return NextResponse.json({
+      pending_tasks: snapshot.counts.pending,
+      running_tasks: snapshot.counts.running,
+      completed_tasks: snapshot.counts.completed,
+      failed_tasks: snapshot.counts.failed,
+      recent_tasks: snapshot.tasks
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load agent queue status";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const response = await fetchWorker("/api/agents/status", {
-    method: "GET",
-    headers: getWorkerHeaders(false)
-  });
-
-  const payload = await response.json().catch(() => null);
-  return NextResponse.json(payload, { status: response.status });
 }
