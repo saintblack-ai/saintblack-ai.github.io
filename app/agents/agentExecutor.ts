@@ -1,9 +1,15 @@
+import { hostname } from "node:os";
 import { supabaseAdmin } from "../lib/supabaseAdmin";
+import {
+  calculateBackoffUntil,
+  CLAIM_STALE_MS,
+  MAX_ATTEMPTS,
+  MAX_AUTOMATIC_APPROVED_RISK_SCORE
+} from "../lib/archaiosConfig";
 import { writeAgentLog } from "../lib/agentLogs";
 import { fetchWorker, getWorkerHeaders } from "../lib/workerClient";
 import { buildExperimentExecutionDraft, buildExperimentProposal } from "./ExperimentAgent";
 
-const MAX_ATTEMPTS = 3;
 const EXECUTOR_AGENT_NAME = "ARCHAIOS Executor";
 
 export const AGENT_EXECUTION_TARGETS = {
@@ -24,6 +30,9 @@ export type AgentTaskRecord = {
   priority: number;
   attempts: number;
   scheduled_at: string;
+  claimed_by?: string | null;
+  claimed_at?: string | null;
+  backoff_until?: string | null;
 };
 
 type AgentTaskStatusCounts = {
@@ -33,45 +42,83 @@ type AgentTaskStatusCounts = {
   failed: number;
 };
 
-function buildRetrySchedule(attempts: number) {
-  const delaySeconds = Math.min(300, Math.max(30, attempts * 30));
-  return new Date(Date.now() + delaySeconds * 1000).toISOString();
+function getExecutorWorkerId() {
+  return process.env.ARCHAIOS_WORKER_ID || `${hostname()}-${process.pid}`;
 }
 
-async function selectNextPendingTask() {
-  const { data, error } = await supabaseAdmin
-    .from("agent_tasks")
-    .select("id, agent_name, task_type, payload, status, priority, attempts, scheduled_at")
-    .eq("status", "pending")
-    .lte("scheduled_at", new Date().toISOString())
-    .order("priority", { ascending: true })
-    .order("scheduled_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+async function writeWorkerHeartbeat(workerId: string, stats: Record<string, unknown>) {
+  const { error } = await supabaseAdmin
+    .from("worker_heartbeat")
+    .upsert({
+      worker_id: workerId,
+      last_seen: new Date().toISOString(),
+      stats
+    }, { onConflict: "worker_id" });
 
   if (error) {
-    throw new Error(`Unable to load next agent task: ${error.message}`);
+    throw new Error(`Unable to update worker heartbeat: ${error.message}`);
   }
-
-  return (data || null) as AgentTaskRecord | null;
 }
 
-async function lockTask(task: AgentTaskRecord) {
+async function listPendingTaskCandidates(limit = 10) {
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabaseAdmin
+    .from("agent_tasks")
+    .select("id, agent_name, task_type, payload, status, priority, attempts, scheduled_at, claimed_by, claimed_at, backoff_until")
+    .eq("status", "pending")
+    .lte("scheduled_at", nowIso)
+    .order("priority", { ascending: true })
+    .order("scheduled_at", { ascending: true })
+    .limit(limit * 3);
+
+  if (error) {
+    throw new Error(`Unable to load next agent task candidates: ${error.message}`);
+  }
+
+  const staleClaimCutoff = Date.now() - CLAIM_STALE_MS;
+
+  return ((data || []) as AgentTaskRecord[]).filter((task) => {
+    const backoffReady = !task.backoff_until || Date.parse(task.backoff_until) <= Date.now();
+    const claimAvailable = !task.claimed_by || !task.claimed_at || Date.parse(task.claimed_at) <= staleClaimCutoff;
+    return backoffReady && claimAvailable;
+  }).slice(0, limit);
+}
+
+async function claimTask(task: AgentTaskRecord, workerId: string) {
+  if (task.claimed_by && task.claimed_at && Date.parse(task.claimed_at) <= Date.now() - CLAIM_STALE_MS) {
+    const { error: resetError } = await supabaseAdmin
+      .from("agent_tasks")
+      .update({
+        claimed_by: null,
+        claimed_at: null
+      })
+      .eq("id", task.id)
+      .eq("status", "pending");
+
+    if (resetError) {
+      throw new Error(`Unable to clear stale claim on agent task: ${resetError.message}`);
+    }
+  }
+
   const startedAt = new Date().toISOString();
   const { data, error } = await supabaseAdmin
     .from("agent_tasks")
     .update({
       status: "running",
       started_at: startedAt,
-      attempts: task.attempts + 1
+      attempts: task.attempts + 1,
+      claimed_by: workerId,
+      claimed_at: startedAt,
+      backoff_until: null
     })
     .eq("id", task.id)
     .eq("status", "pending")
-    .select("id, agent_name, task_type, payload, status, priority, attempts, scheduled_at")
+    .is("claimed_by", null)
+    .select("id, agent_name, task_type, payload, status, priority, attempts, scheduled_at, claimed_by, claimed_at, backoff_until")
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Unable to lock agent task: ${error.message}`);
+    throw new Error(`Unable to claim agent task: ${error.message}`);
   }
 
   return (data || null) as AgentTaskRecord | null;
@@ -102,7 +149,8 @@ async function markCompleted(task: AgentTaskRecord, result: Record<string, unkno
     .update({
       status: "completed",
       completed_at: completedAt,
-      result
+      result,
+      backoff_until: null
     })
     .eq("id", task.id);
 
@@ -114,17 +162,19 @@ async function markCompleted(task: AgentTaskRecord, result: Record<string, unkno
 }
 
 async function markFailed(task: AgentTaskRecord, errorMessage: string) {
-  const nextAttempts = task.attempts + 1;
-  const exhausted = nextAttempts >= MAX_ATTEMPTS;
+  const exhausted = task.attempts >= MAX_ATTEMPTS;
   const { error } = await supabaseAdmin
     .from("agent_tasks")
     .update({
       status: exhausted ? "failed" : "pending",
-      scheduled_at: exhausted ? task.scheduled_at : buildRetrySchedule(nextAttempts),
+      backoff_until: exhausted ? null : calculateBackoffUntil(task.attempts),
       completed_at: exhausted ? new Date().toISOString() : null,
+      claimed_by: null,
+      claimed_at: null,
       result: {
         error: errorMessage,
-        retried_at: new Date().toISOString()
+        retried_at: new Date().toISOString(),
+        attempts: task.attempts
       }
     })
     .eq("id", task.id);
@@ -137,15 +187,21 @@ async function markFailed(task: AgentTaskRecord, errorMessage: string) {
 async function runTask(task: AgentTaskRecord) {
   if (task.task_type === "experiment_proposal") {
     const proposal = await buildExperimentProposal(task.payload || {});
+    const autoApproved = Number(proposal.experiment.risk_score || 0) <= MAX_AUTOMATIC_APPROVED_RISK_SCORE;
+    const approvalStatus = autoApproved ? "approved" : "pending";
+    const approvalTimestamp = autoApproved ? new Date().toISOString() : null;
     const { data, error } = await supabaseAdmin
       .from("agent_approvals")
       .insert({
         agent_name: task.agent_name,
         action_type: "experiment_execution",
         payload: proposal.experiment,
-        status: "pending",
+        status: approvalStatus,
         risk_score: Number(proposal.experiment.risk_score || 0),
-        reason: "Experiment launch affects pricing and outbound messaging, so human approval is required."
+        reason: autoApproved
+          ? "Auto-approved under the low-risk threshold."
+          : "Experiment launch affects pricing and outbound messaging, so human approval is required.",
+        approved_at: approvalTimestamp
       })
       .select("id, status, risk_score")
       .maybeSingle();
@@ -154,13 +210,34 @@ async function runTask(task: AgentTaskRecord) {
       throw new Error(`Unable to create experiment approval: ${error.message}`);
     }
 
+    if (autoApproved && data?.id) {
+      const { error: taskInsertError } = await supabaseAdmin
+        .from("agent_tasks")
+        .insert({
+          agent_name: task.agent_name,
+          task_type: "experiment_execution",
+          payload: {
+            approval_id: data.id,
+            experiment: proposal.experiment
+          },
+          status: "pending",
+          priority: 2,
+          scheduled_at: new Date().toISOString()
+        });
+
+      if (taskInsertError) {
+        throw new Error(`Unable to enqueue auto-approved experiment execution: ${taskInsertError.message}`);
+      }
+    }
+
     await writeAgentLog({
       agentName: "Experiment Agent",
       message: "Experiment proposal created for approval queue.",
       metadata: {
         task_id: task.id,
         approval_id: data?.id || null,
-        experiment_id: proposal.experiment.experiment_id
+        experiment_id: proposal.experiment.experiment_id,
+        auto_approved: autoApproved
       }
     });
 
@@ -255,15 +332,38 @@ async function runTask(task: AgentTaskRecord) {
 }
 
 export async function executeNextAgentTask() {
-  const nextTask = await selectNextPendingTask();
-  if (!nextTask) {
-    return { executed: false, reason: "no_pending_tasks" };
+  const workerId = getExecutorWorkerId();
+  const candidates = await listPendingTaskCandidates();
+  if (candidates.length === 0) {
+    await writeWorkerHeartbeat(workerId, {
+      state: "idle",
+      reason: "no_pending_tasks"
+    });
+    return { executed: false, reason: "no_pending_tasks", workerId };
   }
 
-  const lockedTask = await lockTask(nextTask);
-  if (!lockedTask) {
-    return { executed: false, reason: "task_locked_elsewhere" };
+  let lockedTask: AgentTaskRecord | null = null;
+  for (const candidate of candidates) {
+    lockedTask = await claimTask(candidate, workerId);
+    if (lockedTask) {
+      break;
+    }
   }
+
+  if (!lockedTask) {
+    await writeWorkerHeartbeat(workerId, {
+      state: "idle",
+      reason: "task_locked_elsewhere"
+    });
+    return { executed: false, reason: "task_locked_elsewhere", workerId };
+  }
+
+  await writeWorkerHeartbeat(workerId, {
+    state: "running",
+    task_id: lockedTask.id,
+    agent_name: lockedTask.agent_name,
+    task_type: lockedTask.task_type
+  });
 
   await writeAgentLog({
     agentName: EXECUTOR_AGENT_NAME,
@@ -271,7 +371,8 @@ export async function executeNextAgentTask() {
     metadata: {
       task_id: lockedTask.id,
       agent_name: lockedTask.agent_name,
-      task_type: lockedTask.task_type
+      task_type: lockedTask.task_type,
+      worker_id: workerId
     }
   });
 
@@ -285,14 +386,22 @@ export async function executeNextAgentTask() {
         task_id: lockedTask.id,
         agent_name: lockedTask.agent_name,
         task_type: lockedTask.task_type,
-        status: "completed"
+        status: "completed",
+        worker_id: workerId
       }
+    });
+    await writeWorkerHeartbeat(workerId, {
+      state: "idle",
+      last_task_id: lockedTask.id,
+      last_status: "completed",
+      agent_name: lockedTask.agent_name
     });
     return {
       executed: true,
       status: "completed",
       task: lockedTask,
-      result
+      result,
+      workerId
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown agent executor failure";
@@ -306,14 +415,23 @@ export async function executeNextAgentTask() {
         agent_name: lockedTask.agent_name,
         task_type: lockedTask.task_type,
         status: "failed",
-        error: message
+        error: message,
+        worker_id: workerId
       }
+    });
+    await writeWorkerHeartbeat(workerId, {
+      state: "idle",
+      last_task_id: lockedTask.id,
+      last_status: "failed",
+      agent_name: lockedTask.agent_name,
+      error: message
     });
     return {
       executed: true,
       status: "failed",
       task: lockedTask,
-      error: message
+      error: message,
+      workerId
     };
   }
 }
