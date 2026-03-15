@@ -507,7 +507,7 @@
           <div class="module-header">
             <div>
               <h2 class="module-title">Venture Engine</h2>
-              <p class="module-sub">Generated venture offers, approval state, Stripe draft readiness, and launch asset coverage.</p>
+              <p class="module-sub">Generated venture offers, approval state, Stripe product readiness, launch assets, and performance tracking.</p>
             </div>
           </div>
           <div class="activity-feed" id="venture-offer-list"></div>
@@ -957,14 +957,16 @@
         ventureEngineStatus.textContent = `${offers.length} venture offer${offers.length === 1 ? "" : "s"} loaded.`;
 
         offers.forEach((offer) => {
+          const metrics = offer.metrics || {};
           const item = document.createElement("div");
           item.className = "activity-item";
           item.innerHTML = `
             <div class="activity-meta">${new Date(offer.created_at).toLocaleString()}</div>
             <strong>${offer.title}</strong>
-            <span>Status: ${offer.status}</span>
+            <span>Status: ${offer.status} · Approval: ${offer.approval_state || (offer.approval_id ? "linked" : "none")}</span>
             <span>Price: ${formatPrice(offer.price_cents)} · ${offer.billing_type}</span>
-            <span>Approval: ${offer.approval_id ? "linked" : "none"} · Stripe draft: ${offer.stripe_draft_exists ? "ready" : "missing"} · Assets: ${offer.launch_asset_count}</span>
+            <span>Stripe: ${offer.stripe_product_created ? "live product ready" : offer.stripe_draft_exists ? "draft ready" : "missing"} · Assets: ${offer.launch_assets_ready ? "ready" : `${offer.launch_asset_count || 0}/4`}</span>
+            <span>Metrics: ${Number(metrics.views || 0)} views · ${Number(metrics.clicks || 0)} clicks · ${Number(metrics.conversions || 0)} conversions · ${formatPrice(metrics.revenue_cents || 0)}</span>
             <span>${offer.promise}</span>
           `;
           ventureOfferList.appendChild(item);

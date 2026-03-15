@@ -42,9 +42,9 @@ async function hasFreshCompletedTask(agentName: string, taskType: string, nowIso
   return Boolean(data);
 }
 
-async function hasRecentQueuedTask(agentName: string, taskType: string, nowIso: string) {
+async function hasRecentQueuedTask(agentName: string, taskType: string, nowIso: string, offerId?: string) {
   const windowStart = new Date(Date.parse(nowIso) - SCHEDULER_WINDOW_MS).toISOString();
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("agent_tasks")
     .select("id")
     .eq("agent_name", agentName)
@@ -52,6 +52,12 @@ async function hasRecentQueuedTask(agentName: string, taskType: string, nowIso: 
     .in("status", ["pending", "running"])
     .gte("created_at", windowStart)
     .limit(MAX_CONCURRENT_TASKS_PER_AGENT);
+
+  if (offerId) {
+    query = query.contains("payload", { offer_id: offerId });
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(`Unable to inspect scheduled tasks: ${error.message}`);
@@ -119,16 +125,19 @@ export async function scheduleAgentTasks(now = new Date()) {
     }
   }
 
-  const [{ data: approvedOffers, error: approvedOffersError }, { data: launchAssets, error: launchAssetsError }] = await Promise.all([
+  const [{ data: approvedOffers, error: approvedOffersError }, { data: launchAssets, error: launchAssetsError }, { data: ventureMetrics, error: ventureMetricsError }] = await Promise.all([
     supabaseAdmin
       .from("venture_offers")
       .select("id, title, status, stripe_product_id, stripe_price_id, result")
-      .eq("status", "approved")
+      .in("status", ["approved", "launched"])
       .order("updated_at", { ascending: false })
       .limit(20),
     supabaseAdmin
       .from("venture_launch_assets")
-      .select("offer_id, asset_type")
+      .select("offer_id, asset_type"),
+    supabaseAdmin
+      .from("venture_metrics")
+      .select("offer_id, updated_at")
   ]);
 
   if (approvedOffersError) {
@@ -139,9 +148,21 @@ export async function scheduleAgentTasks(now = new Date()) {
     throw new Error(`Unable to inspect venture launch assets: ${launchAssetsError.message}`);
   }
 
+  if (ventureMetricsError) {
+    throw new Error(`Unable to inspect venture metrics: ${ventureMetricsError.message}`);
+  }
+
   const assetCounts = (launchAssets || []).reduce<Record<string, number>>((acc, asset) => {
     const key = String(asset.offer_id);
     acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const metricTimestamps = (ventureMetrics || []).reduce<Record<string, string>>((acc, metric) => {
+    const key = String(metric.offer_id);
+    if (!acc[key] || Date.parse(String(metric.updated_at || "")) > Date.parse(acc[key])) {
+      acc[key] = String(metric.updated_at);
+    }
     return acc;
   }, {});
 
@@ -150,17 +171,17 @@ export async function scheduleAgentTasks(now = new Date()) {
     const stripeDraftExists = Boolean(
       offer.stripe_product_id ||
       offer.stripe_price_id ||
-      (offer.result && typeof offer.result === "object" && "stripe_draft" in offer.result)
+      (offer.result && typeof offer.result === "object" && ("stripe_product_draft" in offer.result || "stripe_draft" in offer.result))
     );
 
     if (!stripeDraftExists) {
-      const stripeTaskExists = await hasRecentQueuedTask("Stripe Draft Agent", "stripe_draft", nowIso);
+      const stripeTaskExists = await hasRecentQueuedTask("Stripe Product Agent", "stripe_product_creation", nowIso, offerId);
       if (!stripeTaskExists) {
         const { data, error } = await supabaseAdmin
           .from("agent_tasks")
           .insert({
-            agent_name: "Stripe Draft Agent",
-            task_type: "stripe_draft",
+            agent_name: "Stripe Product Agent",
+            task_type: "stripe_product_creation",
             payload: {
               offer_id: offerId
             },
@@ -172,7 +193,7 @@ export async function scheduleAgentTasks(now = new Date()) {
           .maybeSingle();
 
         if (error) {
-          throw new Error(`Unable to schedule Stripe draft task for ${offer.title}: ${error.message}`);
+          throw new Error(`Unable to schedule Stripe product task for ${offer.title}: ${error.message}`);
         }
 
         if (data) {
@@ -183,12 +204,12 @@ export async function scheduleAgentTasks(now = new Date()) {
 
     const launchAssetCount = assetCounts[offerId] || 0;
     if (launchAssetCount < 4) {
-      const assetTaskExists = await hasRecentQueuedTask("Launch Asset Agent", "launch_asset_generation", nowIso);
+      const assetTaskExists = await hasRecentQueuedTask("Launch Campaign Agent", "launch_asset_generation", nowIso, offerId);
       if (!assetTaskExists) {
         const { data, error } = await supabaseAdmin
           .from("agent_tasks")
           .insert({
-            agent_name: "Launch Asset Agent",
+            agent_name: "Launch Campaign Agent",
             task_type: "launch_asset_generation",
             payload: {
               offer_id: offerId
@@ -202,6 +223,39 @@ export async function scheduleAgentTasks(now = new Date()) {
 
         if (error) {
           throw new Error(`Unable to schedule launch asset task for ${offer.title}: ${error.message}`);
+        }
+
+        if (data) {
+          inserted.push(data);
+        }
+      }
+    }
+
+    const metricsFresh = Boolean(
+      metricTimestamps[offerId] &&
+      Date.parse(metricTimestamps[offerId]) > Date.parse(new Date(Date.parse(nowIso) - TASK_RESULT_STALE_MS).toISOString())
+    );
+
+    if (!metricsFresh) {
+      const metricsTaskExists = await hasRecentQueuedTask("Venture Metrics Agent", "venture_metrics_update", nowIso, offerId);
+      if (!metricsTaskExists) {
+        const { data, error } = await supabaseAdmin
+          .from("agent_tasks")
+          .insert({
+            agent_name: "Venture Metrics Agent",
+            task_type: "venture_metrics_update",
+            payload: {
+              offer_id: offerId
+            },
+            priority: 4,
+            status: "pending",
+            scheduled_at: nowIso
+          })
+          .select("id, agent_name, task_type, status, priority, scheduled_at")
+          .maybeSingle();
+
+        if (error) {
+          throw new Error(`Unable to schedule venture metrics task for ${offer.title}: ${error.message}`);
         }
 
         if (data) {

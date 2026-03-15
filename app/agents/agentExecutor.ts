@@ -9,9 +9,10 @@ import {
 import { writeAgentLog } from "../lib/agentLogs";
 import { fetchWorker, getWorkerHeaders } from "../lib/workerClient";
 import { buildExperimentExecutionDraft, buildExperimentProposal } from "./ExperimentAgent";
-import { generateLaunchAssets } from "./LaunchAssetAgent";
+import { generateLaunchCampaign } from "./LaunchCampaignAgent";
 import { generateOfferDraft } from "./OfferGeneratorAgent";
-import { generateStripeDraft } from "./StripeDraftAgent";
+import { createStripeProduct } from "./StripeProductAgent";
+import { updateVentureMetrics } from "./VentureMetricsAgent";
 
 const EXECUTOR_AGENT_NAME = "ARCHAIOS Executor";
 
@@ -23,6 +24,9 @@ export const AGENT_EXECUTION_TARGETS = {
   "Media Ops Agent": "/api/agents/content",
   "Experiment Agent": null,
   "Offer Generator Agent": null,
+  "Stripe Product Agent": null,
+  "Launch Campaign Agent": null,
+  "Venture Metrics Agent": null,
   "Stripe Draft Agent": null,
   "Launch Asset Agent": null
 } as const;
@@ -319,8 +323,8 @@ async function runTask(task: AgentTaskRecord) {
     };
   }
 
-  if (task.task_type === "stripe_draft") {
-    const draft = await generateStripeDraft(task.payload || {});
+  if (task.task_type === "stripe_product_creation" || task.task_type === "stripe_draft") {
+    const draft = await createStripeProduct(task.payload || {});
     return {
       ok: true,
       status: 200,
@@ -329,11 +333,20 @@ async function runTask(task: AgentTaskRecord) {
   }
 
   if (task.task_type === "launch_asset_generation") {
-    const assets = await generateLaunchAssets(task.payload || {});
+    const assets = await generateLaunchCampaign(task.payload || {});
     return {
       ok: true,
       status: 200,
       payload: assets
+    };
+  }
+
+  if (task.task_type === "venture_metrics_update" || task.task_type === "metrics_update") {
+    const metrics = await updateVentureMetrics(task.payload || {});
+    return {
+      ok: true,
+      status: 200,
+      payload: metrics
     };
   }
 

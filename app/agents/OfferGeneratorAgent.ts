@@ -127,7 +127,7 @@ export async function generateOfferDraft(input: Record<string, unknown> = {}) {
       },
       status: "pending",
       risk_score: offerDraft.risk_score,
-      reason: "New venture offers require human approval before Stripe draft preparation."
+      reason: "New venture offers require human approval before Stripe product preparation and launch asset generation."
     })
     .select("*")
     .maybeSingle();

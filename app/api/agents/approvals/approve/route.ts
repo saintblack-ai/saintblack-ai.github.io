@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { writeAgentLog } from "../../../../../lib/agentLogs";
 import { requireDashboardUser } from "../../../../../lib/dashboardAuth";
 import { supabaseAdmin } from "../../../../../lib/supabaseAdmin";
 
@@ -63,6 +64,16 @@ export async function POST(request: Request) {
       if (offerUpdateError) {
         return NextResponse.json({ error: offerUpdateError.message }, { status: 500 });
       }
+
+      await writeAgentLog({
+        agentName: "Approval Queue",
+        message: "Venture offer approval received.",
+        metadata: {
+          approval_id: approval.id,
+          offer_id: offerId,
+          decision
+        }
+      });
     } else {
       const { error: taskError } = await supabaseAdmin
         .from("agent_tasks")
@@ -81,6 +92,16 @@ export async function POST(request: Request) {
       if (taskError) {
         return NextResponse.json({ error: taskError.message }, { status: 500 });
       }
+
+      await writeAgentLog({
+        agentName: "Approval Queue",
+        message: "Execution approval received and task enqueued.",
+        metadata: {
+          approval_id: approval.id,
+          action_type: approval.action_type,
+          decision
+        }
+      });
     }
   } else if (approval.action_type === "venture_offer") {
     const offerId = String(approval.payload?.offer_id || "");
@@ -97,6 +118,16 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: offerUpdateError.message }, { status: 500 });
       }
     }
+
+    await writeAgentLog({
+      agentName: "Approval Queue",
+      message: "Venture offer denied and archived.",
+      metadata: {
+        approval_id: approval.id,
+        offer_id: offerId,
+        decision
+      }
+    });
   }
 
   return NextResponse.json({ approval: data });
